@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full overflow-hidden">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}ITGC SOX Compliance Agent{% endblock %}</title>
+  <!-- tailwind.config MUST come before the CDN script -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50:'#eff6ff', 500:'#3b82f6', 600:'#2563eb', 700:'#1d4ed8', 900:'#1e3a8a' },
+          }
+        }
+      }
+    }
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+
+    /* Plain CSS – @apply with hover variants is not supported by the Tailwind Play CDN */
+    .sidebar-link {
+      display: flex; align-items: center; gap: 0.75rem;
+      padding: 0.625rem 1rem; border-radius: 0.5rem;
+      color: #cbd5e1;                  /* slate-300 */
+      font-size: 0.875rem; font-weight: 500;
+      transition: all 150ms;
+      text-decoration: none;
+    }
+    .sidebar-link:hover { background-color: #334155; color: #ffffff; } /* slate-700 */
+    .sidebar-link.active { background-color: #1d4ed8; color: #ffffff; box-shadow: 0 1px 2px 0 rgb(0 0 0/.05); } /* brand-700 */
+
+    .badge-high    { display:inline-flex; align-items:center; padding:.125rem .5rem; border-radius:.25rem; font-size:.75rem; font-weight:600; background:#fee2e2; color:#991b1b; }
+    .badge-medium  { display:inline-flex; align-items:center; padding:.125rem .5rem; border-radius:.25rem; font-size:.75rem; font-weight:600; background:#fef3c7; color:#92400e; }
+    .badge-low     { display:inline-flex; align-items:center; padding:.125rem .5rem; border-radius:.25rem; font-size:.75rem; font-weight:600; background:#dbeafe; color:#1e40af; }
+    .badge-open    { display:inline-flex; align-items:center; padding:.125rem .5rem; border-radius:.25rem; font-size:.75rem; font-weight:600; background:#f1f5f9; color:#374151; }
+    .badge-ack     { display:inline-flex; align-items:center; padding:.125rem .5rem; border-radius:.25rem; font-size:.75rem; font-weight:600; background:#fef9c3; color:#854d0e; }
+    .badge-resolved{ display:inline-flex; align-items:center; padding:.125rem .5rem; border-radius:.25rem; font-size:.75rem; font-weight:600; background:#dcfce7; color:#166534; }
+  </style>
+</head>
+<body class="h-full overflow-hidden bg-slate-50 text-slate-900 font-sans">
+<div class="flex h-screen overflow-hidden">
+
+  <!-- ── Sidebar ──────────────────────────────────────────────────────── -->
+  <aside class="w-64 flex-shrink-0 bg-slate-900 flex flex-col overflow-y-auto">
+    <!-- Logo -->
+    <div class="px-6 py-5 border-b border-slate-700">
+      <div class="flex items-center gap-2">
+        <div class="w-8 h-8 bg-brand-600 rounded-lg flex items-center justify-center">
+          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+          </svg>
+        </div>
+        <div>
+          <p class="text-white font-bold text-sm leading-tight">SOX Compliance</p>
+          <p class="text-slate-400 text-xs">ITGC Monitoring Agent</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Nav -->
+    <nav class="flex-1 px-3 py-4 space-y-1">
+      <p class="px-4 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Monitoring</p>
+      <a href="/" class="sidebar-link {% if request.endpoint == 'main.dashboard' %}active{% endif %}">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+        </svg>
+        Dashboard
+      </a>
+      <a href="/tickets" class="sidebar-link {% if request.endpoint == 'main.tickets' %}active{% endif %}">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+        </svg>
+        Tickets
+      </a>
+      <a href="/violations" class="sidebar-link {% if request.endpoint == 'main.violations' %}active{% endif %}">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+        </svg>
+        Violations
+      </a>
+      <a href="/validations" class="sidebar-link {% if request.endpoint == 'main.validations' %}active{% endif %}">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+        </svg>
+        Custom Validations
+      </a>
+
+      <p class="px-4 pt-4 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Evidence</p>
+      <a href="/evidence" class="sidebar-link {% if request.endpoint == 'main.evidence' %}active{% endif %}">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/>
+        </svg>
+        Evidence Vault
+      </a>
+
+      <p class="px-4 pt-4 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">System</p>
+      <a href="/connections" class="sidebar-link {% if request.endpoint == 'main.connections' %}active{% endif %}">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+        </svg>
+        Connections
+      </a>
+    </nav>
+
+    <!-- Version footer -->
+    <div class="px-6 py-4 border-t border-slate-700">
+      <p class="text-slate-500 text-xs">v1.0.0 &nbsp;·&nbsp; ITGC SOX Agent</p>
+    </div>
+  </aside>
+
+  <!-- ── Main Content ────────────────────────────────────────────────────── -->
+  <main class="flex-1 flex flex-col overflow-auto min-w-0">
+    <!-- Topbar -->
+    <header class="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between sticky top-0 z-10">
+      <div>
+        <h1 class="text-base font-semibold text-slate-900">{% block page_title %}Dashboard{% endblock %}</h1>
+        <p class="text-xs text-slate-500">{% block page_subtitle %}ITGC SOX Compliance Monitoring{% endblock %}</p>
+      </div>
+      <div class="flex items-center gap-3"
+        x-data="{ mon: false, fetching: false, fetchMsg: '', fetchOk: true }"
+        x-init="fetch('/api/scheduler/status').then(r=>r.json()).then(d=>{ mon = d.running && (d.next_run !== null) })">
+
+        <!-- Fetch Now button -->
+        <div class="relative">
+          <button @click="
+            fetching = true; fetchMsg = '';
+            fetch('/api/analyze', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+              .then(r=>r.json())
+              .then(d=>{
+                if (!d.started) { fetchOk=false; fetchMsg=d.error||'Failed'; fetching=false; return; }
+                let sr=false;
+                const t = setInterval(()=>{
+                  fetch('/api/analyze/progress').then(r=>r.json()).then(p=>{
+                    if(p.running) sr=true;
+                    if(!p.running && sr){ clearInterval(t); fetching=false;
+                      fetchOk = !!p.result;
+                      fetchMsg = p.result ? (p.result.tickets_fetched+' tickets · '+p.result.violations_created+' violation(s)') : (p.stage||'Failed');
+                      setTimeout(()=>fetchMsg='', 5000);
+                    }
+                  }).catch(()=>{});
+                }, 1000);
+              })
+              .catch(e=>{ fetchOk=false; fetchMsg='Error: '+e.message; fetching=false; })"
+            :disabled="fetching"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50 hover:border-slate-300 disabled:opacity-50 transition-colors bg-white">
+            <svg class="w-3.5 h-3.5" :class="fetching ? 'animate-spin' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            <span x-text="fetching ? 'Fetching…' : 'Fetch Now'"></span>
+          </button>
+          <!-- Result tooltip -->
+          <div x-show="fetchMsg" x-cloak x-transition
+            class="absolute right-0 top-full mt-1 z-50 px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap shadow-lg"
+            :class="fetchOk ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'"
+            x-text="fetchMsg"></div>
+        </div>
+
+        <!-- Monitoring status -->
+        <a href="/connections"
+          class="flex items-center gap-1.5 text-xs font-medium"
+          :class="mon ? 'text-emerald-600' : 'text-slate-400'"
+          :title="mon ? 'Continuous monitoring active' : 'Manual mode – click to configure'">
+          <span class="w-2 h-2 rounded-full"
+            :class="mon ? 'bg-emerald-400 animate-pulse' : 'bg-slate-300'"></span>
+          <span x-text="mon ? 'Monitoring Active' : 'Manual Mode'"></span>
+        </a>
+      </div>
+    </header>
+
+    <!-- Page content -->
+    <div class="flex-1 p-6">
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+</div>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

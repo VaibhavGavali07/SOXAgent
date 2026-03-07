@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% macro ticket_link(ticket_key, source) %}
+  {%- if source == 'JIRA' and jira_url -%}
+    {%- set url = jira_url + '/browse/' + ticket_key -%}
+  {%- elif source == 'ServiceNow' and snow_url -%}
+    {%- set url = snow_url + '/change_request.do?sysparm_query=number=' + ticket_key -%}
+  {%- else -%}
+    {%- set url = '' -%}
+  {%- endif -%}
+  {%- if url -%}
+    <a href="{{ url }}" target="_blank" rel="noopener noreferrer"
+      class="font-mono text-xs font-bold text-brand-700 hover:text-brand-900 hover:underline inline-flex items-center gap-0.5">
+      {{ ticket_key }}<svg class="w-3 h-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+    </a>
+  {%- else -%}
+    <span class="font-mono text-xs font-bold text-brand-700">{{ ticket_key }}</span>
+  {%- endif -%}
+{% endmacro %}
+{% block title %}Violations – SOX Compliance{% endblock %}
+{% block page_title %}Compliance Violations{% endblock %}
+{% block page_subtitle %}All detected ITGC control violations{% endblock %}
+
+{% block content %}
+<div x-data="violationsPage()" x-init="init()">
+
+  <!-- Active filter banner (shown when arriving from a dashboard link) -->
+  <div x-show="sevFilter || statusFilter" x-cloak x-transition
+    class="mb-3 flex items-center gap-2 px-3 py-2 bg-brand-50 border border-brand-200 rounded-lg text-xs text-brand-700">
+    <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z"/>
+    </svg>
+    <span>
+      Filtered by:
+      <span x-show="sevFilter" class="font-semibold" x-text="sevFilter + ' severity'"></span>
+      <span x-show="sevFilter && statusFilter"> · </span>
+      <span x-show="statusFilter" class="font-semibold" x-text="statusFilter + ' status'"></span>
+    </span>
+    <button @click="sevFilter=''; statusFilter=''" class="ml-auto text-brand-500 hover:text-brand-700 font-medium">
+      Clear filter ×
+    </button>
+  </div>
+
+  <!-- Filters -->
+  <div class="mb-4 flex flex-wrap gap-3 items-center">
+    <select x-model="sevFilter"
+      class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+      <option value="">All Severities</option>
+      <option value="High">High</option>
+      <option value="Medium">Medium</option>
+      <option value="Low">Low</option>
+    </select>
+    <select x-model="statusFilter"
+      class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+      <option value="">All Statuses</option>
+      <option value="Open">Open</option>
+      <option value="Acknowledged">Acknowledged</option>
+      <option value="Resolved">Resolved</option>
+    </select>
+    <input x-model="search" type="text" placeholder="Search violations…"
+      class="px-3 py-2 border border-slate-200 rounded-lg text-sm w-64 focus:outline-none focus:ring-2 focus:ring-brand-500" />
+    <span class="text-sm text-slate-500">{{ violations|length }} violation(s)</span>
+  </div>
+
+  <!-- Table -->
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
+    <table class="min-w-full divide-y divide-slate-100">
+      <thead class="bg-slate-50">
+        <tr>
+          <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">UUID</th>
+          <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Ticket</th>
+          <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Control</th>
+          <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Type</th>
+          <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Severity</th>
+          <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Status</th>
+          <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Detected</th>
+          <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-50">
+        {% for v in violations %}
+        <tr class="hover:bg-slate-50 transition-colors"
+          x-show="
+            (sevFilter === '' || sevFilter === '{{ v.severity }}') &&
+            (statusFilter === '' || statusFilter === '{{ v.status }}') &&
+            (search === '' || '{{ v.ticket.ticket_key|lower if v.ticket else '' }} {{ v.violation_type|lower }}'.includes(search.toLowerCase()))
+          ">
+          <td class="px-4 py-3">
+            <span class="font-mono text-xs text-slate-400">{{ v.id[:8] }}…</span>
+          </td>
+          <td class="px-4 py-3">
+            {% if v.ticket %}{{ ticket_link(v.ticket.ticket_key, v.ticket.source) }}{% else %}<span class="font-mono text-xs text-slate-400">N/A</span>{% endif %}
+          </td>
+          <td class="px-4 py-3">
+            <span class="font-mono text-xs font-semibold text-slate-700">{{ v.control_id }}</span>
+          </td>
+          <td class="px-4 py-3">
+            <p class="text-xs text-slate-600">{{ v.violation_type.replace('_', ' ').title() }}</p>
+          </td>
+          <td class="px-4 py-3">
+            <span class="
+              {% if v.severity == 'High' %}badge-high
+              {% elif v.severity == 'Medium' %}badge-medium
+              {% else %}badge-low{% endif %}">
+              {{ v.severity }}
+            </span>
+          </td>
+          <td class="px-4 py-3">
+            <span class="
+              {% if v.status == 'Open' %}badge-open
+              {% elif v.status == 'Acknowledged' %}badge-ack
+              {% else %}badge-resolved{% endif %}">
+              {{ v.status }}
+            </span>
+          </td>
+          <td class="px-4 py-3 text-xs text-slate-400">
+            {{ v.detected_at.strftime('%Y-%m-%d %H:%M') }}
+          </td>
+          <td class="px-4 py-3">
+            <div class="flex gap-2">
+              {% if v.status == 'Open' %}
+              <button onclick="updateStatus('{{ v.id }}', 'acknowledge')"
+                class="text-xs px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-100">Ack</button>
+              {% endif %}
+              {% if v.status != 'Resolved' %}
+              <button onclick="updateStatus('{{ v.id }}', 'resolve')"
+                class="text-xs px-2 py-1 rounded border border-green-200 text-green-700 hover:bg-green-50">Resolve</button>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="8" class="px-4 py-10 text-center text-slate-400 text-sm">
+            No violations found. Run an analysis from the Dashboard.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Description Panel (click to expand) -->
+  <div class="mt-4 space-y-2">
+    {% for v in violations %}
+    <details class="bg-white rounded-lg border border-slate-200 shadow-sm group">
+      <summary class="px-4 py-3 cursor-pointer flex items-center gap-3 text-sm font-medium text-slate-700 hover:bg-slate-50">
+        {% if v.ticket %}{{ ticket_link(v.ticket.ticket_key, v.ticket.source) }}{% else %}<span class="font-mono text-xs text-slate-400">N/A</span>{% endif %}
+        <span class="font-mono text-xs text-slate-500">{{ v.control_id }}</span>
+        <span class="
+          {% if v.severity == 'High' %}badge-high
+          {% elif v.severity == 'Medium' %}badge-medium
+          {% else %}badge-low{% endif %}">{{ v.severity }}</span>
+        <span class="text-slate-600 flex-1 truncate">{{ v.violation_type.replace('_', ' ').title() }}</span>
+      </summary>
+      <div class="px-4 pb-4 pt-2 text-sm text-slate-600 border-t border-slate-100">
+        <p><strong>Description:</strong> {{ v.description }}</p>
+        {% if v.evidence %}
+          <p class="mt-2"><strong>AI Analysis:</strong>
+            <a href="/evidence" class="text-brand-600 hover:underline text-xs">View in Evidence Vault →</a>
+          </p>
+        {% endif %}
+      </div>
+    </details>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function violationsPage() {
+  return {
+    sevFilter: '',
+    statusFilter: '',
+    search: '',
+    init() {
+      const p = new URLSearchParams(window.location.search);
+      if (p.get('severity')) this.sevFilter    = p.get('severity');
+      if (p.get('status'))   this.statusFilter = p.get('status');
+      if (p.get('search'))   this.search       = p.get('search');
+    },
+  };
+}
+
+async function updateStatus(vid, action) {
+  await fetch(`/api/violations/${vid}/${action}`, {method: 'POST'});
+  location.reload();
+}
+</script>
+{% endblock %}
