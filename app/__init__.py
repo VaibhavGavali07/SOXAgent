@@ -73,6 +73,14 @@ def _seed_default_settings() -> None:
         "smtp_from":        "",
         "smtp_to":          "",
         "webhook_url":      "",
+        "approved_software_list": "\n".join(Config.APPROVED_SOFTWARE),
+        "enabled_controls": ",".join(
+            [
+                key
+                for key, value in Config.CONTROLS.items()
+                if value.get("enabled", True)
+            ]
+        ),
     }
 
     for key, value in defaults.items():

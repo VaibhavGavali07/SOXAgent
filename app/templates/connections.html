@@ -553,6 +553,16 @@
         <span x-text="resetting ? 'Clearing…' : 'Clear All Compliance Data'"></span>
       </button>
     </div>
+    <div class="flex justify-center">
+      <button @click="resetAllData()" :disabled="resettingAll"
+        class="px-4 py-1.5 border border-red-300 rounded-lg text-xs text-red-700 hover:bg-red-100 disabled:opacity-50 flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M6 7h12M9 7V4h6v3m-9 4h12m-9 4h6m-9 4h12"/>
+        </svg>
+        <span x-text="resettingAll ? 'Resetting DB…' : 'Clear All DB Entries (Including Settings)'"></span>
+      </button>
+    </div>
   </div>
 </div>
 {% endblock %}
@@ -623,7 +633,7 @@ function connectionsPage() {
       smtp_to:    '{{ settings.get("smtp_to", "") }}',
       webhook_url: '{{ settings.get("webhook_url", "") }}',
     },
-    saving: false, resetting: false,
+    saving: false, resetting: false, resettingAll: false,
     saveMsg: '', saveError: false,
     llmKeySaved:   {{ 'true' if settings.get("llm_api_key") else 'false' }},
     notifPwdSaved: {{ 'true' if settings.get("smtp_password") else 'false' }},
@@ -810,6 +820,18 @@ function connectionsPage() {
         this.saveMsg = data.success ? '✓ ' + data.message : 'Error: ' + (data.error || 'Unknown');
       } catch (e) { this.saveError = true; this.saveMsg = 'Network error: ' + e.message; }
       finally { this.resetting = false; setTimeout(() => this.saveMsg = '', 5000); }
+    },
+
+    async resetAllData() {
+      if (!confirm('This will permanently delete ALL database entries including rules and settings, then restore default settings. Continue?')) return;
+      this.resettingAll = true; this.saveMsg = '';
+      try {
+        const r = await fetch('/api/data/reset-all', { method: 'POST' });
+        const data = await r.json();
+        this.saveError = !data.success;
+        this.saveMsg = data.success ? '✓ ' + data.message : 'Error: ' + (data.error || 'Unknown');
+      } catch (e) { this.saveError = true; this.saveMsg = 'Network error: ' + e.message; }
+      finally { this.resettingAll = false; setTimeout(() => this.saveMsg = '', 5000); }
     },
   };
 }

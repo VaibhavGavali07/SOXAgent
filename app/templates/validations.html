@@ -1,33 +1,46 @@
-{% extends "base.html" %}
-{% block title %}Custom Validations – SOX Compliance{% endblock %}
+﻿{% extends "base.html" %}
+{% block title %}Custom Validations - SOX Compliance{% endblock %}
 {% block page_title %}Custom Validations{% endblock %}
 {% block page_subtitle %}Define additional compliance rules that run alongside built-in ITGC checks{% endblock %}
 
 {% block content %}
 <div x-data="validationsPage()" x-init="init()">
 
-  <!-- ── Save / error banner ──────────────────────────────────────────────── -->
   <div x-show="msg" x-cloak x-transition
     class="mb-4 p-3 rounded-lg text-sm font-medium"
     :class="isError ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-emerald-50 border border-emerald-200 text-emerald-700'"
     x-text="msg"></div>
 
-  <!-- ── Header row ───────────────────────────────────────────────────────── -->
   <div class="flex items-center justify-between mb-4">
     <p class="text-sm text-slate-500">
-      <span x-text="rules.length"></span> rule(s) defined ·
+      <span x-text="rules.length"></span> rule(s) defined |
       <span x-text="rules.filter(r=>r.enabled).length"></span> active
     </p>
     <button @click="openForm()"
       class="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition-colors">
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-      </svg>
       New Validation Rule
     </button>
   </div>
 
-  <!-- ── Rules table ──────────────────────────────────────────────────────── -->
+  <div class="mb-6 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+    <div class="px-5 py-4 bg-slate-50 border-b border-slate-100">
+      <h3 class="text-sm font-semibold text-slate-700">ITGC-SW-01 Allowed Software</h3>
+      <p class="text-xs text-slate-400 mt-0.5">Define approved software list used by Unauthorized Software Installation checks.</p>
+    </div>
+    <div class="p-5 space-y-3">
+      <textarea x-model="approvedSoftwareText" rows="6"
+        placeholder="One software per line or comma-separated"
+        class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500"></textarea>
+      <div class="flex items-center justify-between">
+        <p class="text-xs text-slate-400">Example: Microsoft Office 365, Zoom, Slack, Visual Studio Code</p>
+        <button @click="saveApprovedSoftware()" :disabled="savingSoftware"
+          class="px-4 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-medium rounded-lg transition-colors">
+          <span x-text="savingSoftware ? 'Saving...' : 'Save Allowed Software'"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
     <table class="min-w-full divide-y divide-slate-100">
       <thead class="bg-slate-50">
@@ -42,8 +55,6 @@
         </tr>
       </thead>
       <tbody class="divide-y divide-slate-50">
-
-        <!-- Server-rendered rows -->
         {% for r in rules %}
         <tr class="hover:bg-slate-50 transition-colors" id="rule-row-{{ r.id }}">
           <td class="px-4 py-3">
@@ -52,135 +63,99 @@
             <p class="text-xs text-slate-400 mt-0.5 max-w-xs truncate">{{ r.description }}</p>
             {% endif %}
           </td>
-          <td class="px-4 py-3">
-            <span class="font-mono text-xs font-semibold text-brand-700">{{ r.control_id }}</span>
-          </td>
-          <td class="px-4 py-3">
-            <code class="text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">
-              {{ r.field }} {{ r.operator.replace('_', ' ') }}{% if r.value %} "{{ r.value }}"{% endif %}
-            </code>
-          </td>
+          <td class="px-4 py-3"><span class="font-mono text-xs font-semibold text-brand-700">{{ r.control_id }}</span></td>
+          <td class="px-4 py-3"><code class="text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">{{ r.field }} {{ r.operator.replace('_', ' ') }}{% if r.value %} "{{ r.value }}"{% endif %}</code></td>
           <td class="px-4 py-3 text-xs text-slate-500">
             {% if r.apply_to_status %}status: <strong>{{ r.apply_to_status }}</strong>{% endif %}
-            {% if r.apply_to_type %}{% if r.apply_to_status %} · {% endif %}type: <strong>{{ r.apply_to_type }}</strong>{% endif %}
+            {% if r.apply_to_type %}{% if r.apply_to_status %} | {% endif %}type: <strong>{{ r.apply_to_type }}</strong>{% endif %}
             {% if not r.apply_to_status and not r.apply_to_type %}<span class="text-slate-300">All tickets</span>{% endif %}
           </td>
           <td class="px-4 py-3">
-            <span class="
-              {% if r.severity == 'High' %}badge-high
-              {% elif r.severity == 'Medium' %}badge-medium
-              {% else %}badge-low{% endif %}">
-              {{ r.severity }}
-            </span>
+            <span class="{% if r.severity == 'High' %}badge-high{% elif r.severity == 'Medium' %}badge-medium{% else %}badge-low{% endif %}">{{ r.severity }}</span>
           </td>
           <td class="px-4 py-3">
             <button onclick="toggleRule('{{ r.id }}', {{ 'true' if r.enabled else 'false' }})"
-              class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none
-                {{ 'bg-brand-600' if r.enabled else 'bg-slate-200' }}"
-              id="toggle-{{ r.id }}"
-              title="{{ 'Disable' if r.enabled else 'Enable' }} rule">
-              <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out
-                {{ 'translate-x-4' if r.enabled else 'translate-x-0' }}"
+              class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none {{ 'bg-brand-600' if r.enabled else 'bg-slate-200' }}"
+              id="toggle-{{ r.id }}" title="{{ 'Disable' if r.enabled else 'Enable' }} rule">
+              <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out {{ 'translate-x-4' if r.enabled else 'translate-x-0' }}"
                 id="toggle-dot-{{ r.id }}"></span>
             </button>
           </td>
           <td class="px-4 py-3">
             <div class="flex gap-2">
-              <button onclick='editRule({{ r.to_dict() | tojson }})'
-                class="text-xs px-2 py-1 rounded border border-brand-200 text-brand-600 hover:bg-brand-50">Edit</button>
-              <button onclick="deleteRule('{{ r.id }}')"
-                class="text-xs px-2 py-1 rounded border border-red-200 text-red-600 hover:bg-red-50">Delete</button>
+              <button onclick='editRule({{ r.to_dict() | tojson }})' class="text-xs px-2 py-1 rounded border border-brand-200 text-brand-600 hover:bg-brand-50">Edit</button>
+              <button onclick="deleteRule('{{ r.id }}')" class="text-xs px-2 py-1 rounded border border-red-200 text-red-600 hover:bg-red-50">Delete</button>
             </div>
           </td>
         </tr>
         {% else %}
-        <tr id="empty-row">
-          <td colspan="7" class="px-4 py-12 text-center text-slate-400 text-sm">
-            No custom validation rules yet.
-            <button @click="openForm()" class="text-brand-600 hover:underline ml-1">Create your first rule →</button>
-          </td>
-        </tr>
+        <tr id="empty-row"><td colspan="7" class="px-4 py-12 text-center text-slate-400 text-sm">No custom validation rules yet.</td></tr>
         {% endfor %}
-
       </tbody>
     </table>
   </div>
 
-  <!-- ── Built-in rules reference ─────────────────────────────────────────── -->
   <div class="mt-6 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
     <div class="px-5 py-4 bg-slate-50 border-b border-slate-100">
-      <h3 class="text-sm font-semibold text-slate-700">Built-in ITGC Rules (read-only)</h3>
-      <p class="text-xs text-slate-400 mt-0.5">These run automatically on every analysis. Use the Connections page to view their control definitions.</p>
+      <h3 class="text-sm font-semibold text-slate-700">Built-in ITGC Controls</h3>
+      <p class="text-xs text-slate-400 mt-0.5">All controls remain visible. Only enabled controls are included in analysis and AI output.</p>
     </div>
     <div class="divide-y divide-slate-50 text-sm">
-      {% set builtin = [
-        ('ITGC-AC-01', 'Self-Approval Prevention', 'High', 'requestor_id equals approver_id'),
-        ('ITGC-AC-02', 'Unauthorized Approver', 'High', 'approver_id not in AUTHORIZED_APPROVERS list'),
-        ('ITGC-AC-03', 'Unauthorized Privileged Access', 'High', 'privileged tag + unauthorized approver'),
-        ('ITGC-AC-04', 'Missing Approval', 'High', 'approver_id is_empty on closed ticket'),
-        ('ITGC-AC-05', 'Invalid Approval Timestamp', 'High', 'approval_timestamp after closed_at'),
-        ('ITGC-WF-01', 'Missing Closure Documentation', 'Medium', 'documentation_link is_empty on closed ticket'),
-        ('ITGC-WF-02', 'Missing Implementer Assignment', 'Medium', 'implementer_id is_empty on closed ticket'),
-        ('ITGC-SOD-01', 'Segregation of Duties Violation', 'High', 'single user in Requestor + Approver + Implementer'),
-        ('ITGC-SW-01', 'Unauthorized Software Installation', 'Medium', 'software not in APPROVED_SOFTWARE list'),
-      ] %}
-      {% for cid, name, sev, cond in builtin %}
-      <div class="px-5 py-2.5 flex items-center gap-4">
-        <span class="font-mono text-xs font-bold text-brand-700 w-28 flex-shrink-0">{{ cid }}</span>
-        <span class="text-slate-700 flex-1">{{ name }}</span>
-        <code class="text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-500 hidden sm:block">{{ cond }}</code>
-        <span class="
-          {% if sev == 'High' %}badge-high{% elif sev == 'Medium' %}badge-medium{% else %}badge-low{% endif %}
-          flex-shrink-0">{{ sev }}</span>
+      <template x-for="ctrl in controls" :key="ctrl.key">
+        <div class="px-5 py-2.5 flex items-center gap-4">
+          <span class="font-mono text-xs font-bold text-brand-700 w-28 flex-shrink-0" x-text="ctrl.id"></span>
+          <span class="text-slate-700 flex-1" x-text="ctrl.name"></span>
+          <span class="flex-shrink-0" :class="ctrl.severity === 'High' ? 'badge-high' : (ctrl.severity === 'Medium' ? 'badge-medium' : 'badge-low')" x-text="ctrl.severity"></span>
+          <button type="button" @click="ctrl.enabled = !ctrl.enabled" :class="ctrl.enabled ? 'bg-brand-600' : 'bg-slate-200'" class="relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out">
+            <span :class="ctrl.enabled ? 'translate-x-4' : 'translate-x-0'" class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+          </button>
+        </div>
+      </template>
+      <div class="px-5 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+        <p class="text-xs text-slate-500"><span x-text="controls.filter(c => c.enabled).length"></span> control(s) enabled</p>
+        <button @click="saveControls()" :disabled="savingControls" class="px-4 py-1.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-xs font-medium rounded-lg transition-colors">
+          <span x-text="savingControls ? 'Saving...' : 'Save Built-in Control Selection'"></span>
+        </button>
       </div>
-      {% endfor %}
     </div>
   </div>
 
-  <!-- ── Create / Edit Modal ───────────────────────────────────────────────── -->
-  <div x-show="showForm" x-cloak
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-    @keydown.escape.window="showForm = false">
+  <div x-show="showForm" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" @keydown.escape.window="showForm = false">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-hidden flex flex-col">
-
-      <!-- Header -->
       <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
         <h2 class="text-base font-bold text-slate-900" x-text="editingId ? 'Edit Validation Rule' : 'New Validation Rule'"></h2>
-        <button @click="showForm = false" class="text-slate-400 hover:text-slate-600">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-          </svg>
-        </button>
+        <button @click="showForm = false" class="text-slate-400 hover:text-slate-600">X</button>
       </div>
 
-      <!-- Body -->
       <div class="flex-1 overflow-auto p-6 space-y-4">
-
-        <!-- Name -->
         <div>
           <label class="block text-xs font-semibold text-slate-600 mb-1">Rule Name <span class="text-red-500">*</span></label>
-          <input x-model="form.name" type="text" placeholder="e.g. Contractor must not approve critical tickets"
-            class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+          <input x-model="form.name" type="text" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
         </div>
 
-        <!-- Description -->
         <div>
           <label class="block text-xs font-semibold text-slate-600 mb-1">Description / Violation Message</label>
-          <textarea x-model="form.description" rows="2" placeholder="Describe what this rule checks and why it matters…"
-            class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"></textarea>
+          <textarea x-model="form.description" rows="2" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"></textarea>
         </div>
 
-        <!-- Control ID + Severity -->
+        <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-2">
+          <label class="block text-xs font-semibold text-slate-600">Define Rule In Plain English</label>
+          <textarea x-model="ruleText" rows="3" placeholder="Example: Closed incidents must have approver set. High severity." class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"></textarea>
+          <div class="flex justify-end">
+            <button @click="generateFromText()" :disabled="generatingRule" class="px-3 py-1.5 border border-brand-200 rounded-lg text-xs text-brand-700 hover:bg-brand-50 disabled:opacity-60">
+              <span x-text="generatingRule ? 'Generating...' : 'Generate Rule From Text'"></span>
+            </button>
+          </div>
+        </div>
+
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label class="block text-xs font-semibold text-slate-600 mb-1">Control ID <span class="text-red-500">*</span></label>
-            <input x-model="form.control_id" type="text" placeholder="ITGC-CUSTOM-001"
-              class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+            <input x-model="form.control_id" type="text" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
           </div>
           <div>
             <label class="block text-xs font-semibold text-slate-600 mb-1">Severity <span class="text-red-500">*</span></label>
-            <select x-model="form.severity"
-              class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+            <select x-model="form.severity" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
               <option value="High">High</option>
               <option value="Medium">Medium</option>
               <option value="Low">Low</option>
@@ -188,16 +163,13 @@
           </div>
         </div>
 
-        <!-- Condition -->
         <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
           <p class="text-xs font-semibold text-slate-600 uppercase tracking-wider">Condition</p>
           <div class="grid grid-cols-3 gap-2">
-            <!-- Field -->
             <div>
               <label class="block text-xs text-slate-500 mb-1">Field <span class="text-red-500">*</span></label>
-              <select x-model="form.field"
-                class="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
-                <option value="">— pick field —</option>
+              <select x-model="form.field" class="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                <option value="">- pick field -</option>
                 <option value="requestor_id">requestor_id</option>
                 <option value="approver_id">approver_id</option>
                 <option value="implementer_id">implementer_id</option>
@@ -207,14 +179,14 @@
                 <option value="documentation_link">documentation_link</option>
                 <option value="source">source</option>
                 <option value="title">title</option>
+                <option value="comments.text">comments.text</option>
+                <option value="comments.author">comments.author</option>
               </select>
             </div>
-            <!-- Operator -->
             <div>
               <label class="block text-xs text-slate-500 mb-1">Operator <span class="text-red-500">*</span></label>
-              <select x-model="form.operator"
-                class="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
-                <option value="">— pick —</option>
+              <select x-model="form.operator" class="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+                <option value="">- pick -</option>
                 <option value="is_empty">is empty</option>
                 <option value="is_not_empty">is not empty</option>
                 <option value="equals">equals</option>
@@ -223,25 +195,18 @@
                 <option value="not_contains">not contains</option>
               </select>
             </div>
-            <!-- Value -->
             <div>
               <label class="block text-xs text-slate-500 mb-1">Value</label>
-              <input x-model="form.value" type="text" placeholder="comparison value"
-                :disabled="form.operator === 'is_empty' || form.operator === 'is_not_empty'"
-                class="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-slate-100 disabled:text-slate-400" />
+              <input x-model="form.value" type="text" :disabled="form.operator === 'is_empty' || form.operator === 'is_not_empty'" class="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-slate-100 disabled:text-slate-400" />
             </div>
           </div>
-          <!-- Live preview -->
-          <p class="text-xs text-slate-500 font-mono bg-white rounded px-2 py-1 border border-slate-200"
-            x-text="conditionPreview()"></p>
+          <p class="text-xs text-slate-500 font-mono bg-white rounded px-2 py-1 border border-slate-200" x-text="conditionPreview()"></p>
         </div>
 
-        <!-- Scope filters -->
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label class="block text-xs font-semibold text-slate-600 mb-1">Apply only when status is</label>
-            <select x-model="form.apply_to_status"
-              class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+            <select x-model="form.apply_to_status" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
               <option value="">All statuses</option>
               <option value="Open">Open</option>
               <option value="Closed">Closed</option>
@@ -250,9 +215,9 @@
           </div>
           <div>
             <label class="block text-xs font-semibold text-slate-600 mb-1">Apply only when type is</label>
-            <select x-model="form.apply_to_type"
-              class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+            <select x-model="form.apply_to_type" class="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
               <option value="">All types</option>
+              <option value="Incident">Incident</option>
               <option value="Access Request">Access Request</option>
               <option value="Change Request">Change Request</option>
               <option value="Service Request">Service Request</option>
@@ -264,29 +229,27 @@
           </div>
         </div>
 
-        <!-- Enabled toggle -->
         <label class="flex items-center gap-3 cursor-pointer">
           <input type="checkbox" x-model="form.enabled" class="w-4 h-4 rounded border-slate-300 text-brand-600" />
           <span class="text-sm text-slate-700">Enable rule immediately</span>
         </label>
-
       </div>
 
-      <!-- Footer -->
       <div class="px-6 py-4 border-t border-slate-200 flex items-center justify-end gap-3">
-        <button @click="showForm = false"
-          class="px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
-          Cancel
-        </button>
-        <button @click="saveRule()" :disabled="saving"
-          class="px-5 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-medium rounded-lg transition-colors">
-          <span x-text="saving ? 'Saving…' : (editingId ? 'Update Rule' : 'Create Rule')"></span>
+        <button @click="showForm = false" class="px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">Cancel</button>
+        <button @click="saveRule()" :disabled="saving" class="px-5 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-medium rounded-lg transition-colors">
+          <span x-text="saving ? 'Saving...' : (editingId ? 'Update Rule' : 'Create Rule')"></span>
         </button>
       </div>
     </div>
   </div>
 
 </div>
+
+<button @click="openForm()"
+  class="fixed bottom-6 right-6 z-40 inline-flex items-center gap-2 px-4 py-3 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold rounded-full shadow-lg transition-colors">
+  + Add Rule
+</button>
 {% endblock %}
 
 {% block scripts %}
@@ -294,11 +257,17 @@
 function validationsPage() {
   return {
     rules: {{ rules | map(attribute='to_dict') | list | tojson }},
+    controls: {{ controls | tojson }},
     showForm: false,
     editingId: null,
     saving: false,
+    savingSoftware: false,
+    savingControls: false,
+    generatingRule: false,
     msg: '',
     isError: false,
+    approvedSoftwareText: {{ (approved_software or '') | tojson }},
+    ruleText: '',
     form: {
       name: '', description: '', control_id: '', severity: 'High',
       field: '', operator: '', value: '', apply_to_status: '', apply_to_type: '',
@@ -311,8 +280,8 @@ function validationsPage() {
 
     openForm() {
       this.editingId = null;
-      this.form = { name:'', description:'', control_id:'', severity:'High',
-                    field:'', operator:'', value:'', apply_to_status:'', apply_to_type:'', enabled:true };
+      this.form = { name:'', description:'', control_id:'', severity:'High', field:'', operator:'', value:'', apply_to_status:'', apply_to_type:'', enabled:true };
+      this.ruleText = '';
       this.showForm = true;
     },
 
@@ -325,14 +294,76 @@ function validationsPage() {
         apply_to_status: rule.apply_to_status || '', apply_to_type: rule.apply_to_type || '',
         enabled: rule.enabled,
       };
+      this.ruleText = rule.description || '';
       this.showForm = true;
     },
 
     conditionPreview() {
       const f = this.form.field || '<field>';
       const o = (this.form.operator || '<op>').replace(/_/g, ' ');
-      const v = this.form.value ? ` "${this.form.value}"` : '';
-      return `IF ${f} ${o}${v} → violation`;
+      const v = this.form.value ? ` \"${this.form.value}\"` : '';
+      return `IF ${f} ${o}${v} -> violation`;
+    },
+
+    async saveApprovedSoftware() {
+      this.savingSoftware = true;
+      try {
+        const r = await fetch('/api/settings', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ approved_software_list: this.approvedSoftwareText }),
+        });
+        const data = await r.json();
+        this.flash(data.success ? 'Saved allowed software list.' : ('Error: ' + (data.error || 'Unknown')), !data.success);
+      } catch (e) {
+        this.flash('Network error: ' + e.message, true);
+      } finally {
+        this.savingSoftware = false;
+      }
+    },
+
+    async saveControls() {
+      this.savingControls = true;
+      try {
+        const enabled = this.controls.filter(c => c.enabled).map(c => c.key);
+        const r = await fetch('/api/controls', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ enabled }),
+        });
+        const data = await r.json();
+        this.flash(data.success ? 'Saved built-in control selection.' : ('Error: ' + (data.error || 'Unknown')), !data.success);
+      } catch (e) {
+        this.flash('Network error: ' + e.message, true);
+      } finally {
+        this.savingControls = false;
+      }
+    },
+
+    async generateFromText() {
+      if (!this.ruleText.trim()) {
+        this.flash('Enter a rule description first.', true);
+        return;
+      }
+      this.generatingRule = true;
+      try {
+        const r = await fetch('/api/rules/interpret', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ rule_text: this.ruleText }),
+        });
+        const data = await r.json();
+        if (!data.success) {
+          this.flash('Error: ' + (data.error || 'Could not parse rule text'), true);
+          return;
+        }
+        this.form = { ...this.form, ...data.rule };
+        this.flash('Generated rule fields from text. Review and save.', false);
+      } catch (e) {
+        this.flash('Network error: ' + e.message, true);
+      } finally {
+        this.generatingRule = false;
+      }
     },
 
     async saveRule() {
@@ -341,13 +372,13 @@ function validationsPage() {
       }
       this.saving = true;
       try {
-        const url   = this.editingId ? `/api/rules/${this.editingId}` : '/api/rules';
+        const url = this.editingId ? `/api/rules/${this.editingId}` : '/api/rules';
         const method = this.editingId ? 'PUT' : 'POST';
         const r = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(this.form) });
         const data = await r.json();
         if (data.success) {
           this.showForm = false;
-          this.flash(this.editingId ? '✓ Rule updated.' : '✓ Rule created.', false);
+          this.flash(this.editingId ? 'Rule updated.' : 'Rule created.', false);
           location.reload();
         } else {
           this.flash('Error: ' + (data.error || 'Unknown'), true);
@@ -357,31 +388,21 @@ function validationsPage() {
     },
 
     flash(text, error) {
-      this.msg = text; this.isError = error;
+      this.msg = text;
+      this.isError = error;
       setTimeout(() => this.msg = '', 4000);
     },
   };
 }
 
 function editRule(rule) {
-  // Alpine 3: dispatch a DOM event that the x-data component listens for
   document.dispatchEvent(new CustomEvent('edit-rule', { detail: rule }));
 }
 
-async function toggleRule(id, currentEnabled) {
+async function toggleRule(id) {
   const r = await fetch(`/api/rules/${id}/toggle`, { method: 'POST' });
   const data = await r.json();
-  if (data.success) {
-    const btn = document.getElementById(`toggle-${id}`);
-    const dot = document.getElementById(`toggle-dot-${id}`);
-    if (data.enabled) {
-      btn.classList.replace('bg-slate-200', 'bg-brand-600');
-      dot.classList.replace('translate-x-0', 'translate-x-4');
-    } else {
-      btn.classList.replace('bg-brand-600', 'bg-slate-200');
-      dot.classList.replace('translate-x-4', 'translate-x-0');
-    }
-  }
+  if (data.success) location.reload();
 }
 
 async function deleteRule(id) {

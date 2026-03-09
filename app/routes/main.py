@@ -1,7 +1,7 @@
 """Page routes – all rendered HTML views."""
 from __future__ import annotations
 
-from flask import Blueprint, render_template
+from flask import Blueprint, render_template, current_app
 from sqlalchemy import func
 
 from app.extensions import db
@@ -57,4 +57,16 @@ def connections():
 def validations():
     from app.models.models import CustomRule
     rules = CustomRule.query.order_by(CustomRule.created_at.desc()).all()
-    return render_template("validations.html", rules=rules)
+    setting = Setting.query.filter_by(key="approved_software_list").first()
+    enabled_row = Setting.query.filter_by(key="enabled_controls").first()
+    enabled = {item.strip() for item in (enabled_row.value if enabled_row else "").split(",") if item.strip()}
+    controls_cfg = current_app.config.get("CONTROLS", {})
+    controls = []
+    for key, value in controls_cfg.items():
+        controls.append({"key": key, **value, "enabled": (key in enabled) if enabled else value.get("enabled", True)})
+    approved_software = (
+        setting.value
+        if setting and setting.value
+        else "\n".join(current_app.config.get("APPROVED_SOFTWARE", []))
+    )
+    return render_template("validations.html", rules=rules, approved_software=approved_software, controls=controls)

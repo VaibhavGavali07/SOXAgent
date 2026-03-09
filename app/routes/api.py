@@ -5,6 +5,7 @@ import json
 import io
 import threading
 from datetime import datetime
+import re
 
 from flask import Blueprint, current_app, jsonify, request, send_file, abort
 from sqlalchemy import func
@@ -13,6 +14,17 @@ from app.extensions import db
 from app.models.models import AuditEvidence, CustomRule, Setting, Ticket, Violation
 
 api_bp = Blueprint("api", __name__)
+
+
+def _get_effective_controls() -> dict[str, dict]:
+    controls = json.loads(json.dumps(current_app.config.get("CONTROLS", {})))
+    enabled_row = Setting.query.filter_by(key="enabled_controls").first()
+    if not enabled_row or not enabled_row.value:
+        return controls
+    enabled = {item.strip() for item in enabled_row.value.split(",") if item.strip()}
+    for key, value in controls.items():
+        value["enabled"] = key in enabled
+    return controls
 
 
 # ── Dashboard Stats ──────────────────────────────────────────────────────────
@@ -363,6 +375,120 @@ def create_rule():
     return jsonify({"success": True, "rule": rule.to_dict()}), 201
 
 
+def _infer_rule_from_text(text: str) -> dict:
+    """Heuristic parser: plain-English rule text -> CustomRule shape."""
+    raw = (text or "").strip()
+    low = raw.lower()
+    if not raw:
+        return {}
+
+    field_map = [
+        ("approver", "approver_id"),
+        ("requestor", "requestor_id"),
+        ("requester", "requestor_id"),
+        ("implementer", "implementer_id"),
+        ("status", "status"),
+        ("priority", "priority"),
+        ("documentation", "documentation_link"),
+        ("doc link", "documentation_link"),
+        ("source", "source"),
+        ("title", "title"),
+        ("comment author", "comments.author"),
+        ("comment by", "comments.author"),
+        ("comments", "comments.text"),
+        ("comment", "comments.text"),
+        ("ticket type", "ticket_type"),
+        ("type", "ticket_type"),
+    ]
+
+    field = ""
+    for needle, mapped in field_map:
+        if needle in low:
+            field = mapped
+            break
+    if not field:
+        field = "title"
+
+    operator = "contains"
+    value = ""
+
+    quoted = re.findall(r'"([^"]+)"|\'([^\']+)\'', raw)
+    quoted_vals = [a or b for a, b in quoted if (a or b)]
+    first_quoted = quoted_vals[0] if quoted_vals else ""
+
+    if any(k in low for k in ("must have", "should have", "required", "is required", "not empty", "cannot be empty")):
+        operator = "is_empty"
+    elif any(k in low for k in ("must be empty", "should be empty")):
+        operator = "is_not_empty"
+    elif "must not contain" in low or "should not contain" in low or "cannot contain" in low:
+        operator = "contains"
+        value = first_quoted or ""
+    elif "must contain" in low or "should contain" in low or "must include" in low:
+        operator = "not_contains"
+        value = first_quoted or ""
+    elif "must not equal" in low or "should not equal" in low:
+        operator = "equals"
+        value = first_quoted or ""
+    elif "must equal" in low or "should equal" in low or "equals" in low:
+        operator = "not_equals"
+        value = first_quoted or ""
+    else:
+        m = re.search(r"(contains|equals|is)\s+([a-zA-Z0-9_.-]+)", low)
+        if m:
+            token = m.group(2).strip()
+            operator = "contains" if m.group(1) == "contains" else "not_equals"
+            value = first_quoted or token
+
+    severity = "Medium"
+    if "high" in low or "critical" in low:
+        severity = "High"
+    elif "low" in low:
+        severity = "Low"
+
+    apply_to_status = ""
+    if "resolved" in low:
+        apply_to_status = "Resolved"
+    elif "closed" in low:
+        apply_to_status = "Closed"
+    elif "open" in low:
+        apply_to_status = "Open"
+
+    apply_to_type = ""
+    if "incident" in low:
+        apply_to_type = "Incident"
+    elif "change request" in low:
+        apply_to_type = "Change Request"
+    elif "access request" in low:
+        apply_to_type = "Access Request"
+
+    name = raw.split(".")[0].strip()
+    if len(name) > 80:
+        name = name[:80].rstrip() + "..."
+
+    return {
+        "name": name or "Custom validation rule",
+        "description": raw,
+        "control_id": "ITGC-CUSTOM-001",
+        "severity": severity,
+        "field": field,
+        "operator": operator,
+        "value": value,
+        "apply_to_status": apply_to_status,
+        "apply_to_type": apply_to_type,
+        "enabled": True,
+    }
+
+
+@api_bp.route("/rules/interpret", methods=["POST"])
+def interpret_rule():
+    payload = request.get_json(force=True) or {}
+    rule_text = payload.get("rule_text", "")
+    inferred = _infer_rule_from_text(rule_text)
+    if not inferred:
+        return jsonify({"success": False, "error": "Rule text is empty"}), 400
+    return jsonify({"success": True, "rule": inferred})
+
+
 @api_bp.route("/rules/<rid>", methods=["PUT"])
 def update_rule(rid: str):
     rule = CustomRule.query.get_or_404(rid)
@@ -395,6 +521,35 @@ def toggle_rule(rid: str):
     return jsonify({"success": True, "enabled": rule.enabled})
 
 
+@api_bp.route("/controls", methods=["GET"])
+def list_controls():
+    controls = _get_effective_controls()
+    payload = [{"key": k, **v} for k, v in controls.items()]
+    return jsonify(payload)
+
+
+@api_bp.route("/controls", methods=["POST"])
+def save_controls():
+    payload = request.get_json(force=True) or {}
+    enabled = payload.get("enabled", [])
+    if not isinstance(enabled, list):
+        return jsonify({"success": False, "error": "enabled must be a list"}), 400
+
+    controls = current_app.config.get("CONTROLS", {})
+    valid_keys = {k for k in controls.keys()}
+    enabled_keys = [k for k in enabled if k in valid_keys]
+
+    row = Setting.query.filter_by(key="enabled_controls").first()
+    value = ",".join(enabled_keys)
+    if row:
+        row.value = value
+        row.updated_at = datetime.utcnow()
+    else:
+        db.session.add(Setting(key="enabled_controls", value=value))
+    db.session.commit()
+    return jsonify({"success": True, "enabled": enabled_keys})
+
+
 # ── Data Reset ────────────────────────────────────────────────────────────────
 
 @api_bp.route("/data/reset", methods=["POST"])
@@ -410,6 +565,24 @@ def reset_data():
         db.session.rollback()
         return jsonify({"success": False, "error": str(exc)}), 500
 
+@api_bp.route("/data/reset-all", methods=["POST"])
+def reset_all_data():
+    """Delete all persisted records, then reseed default settings."""
+    try:
+        from app import _seed_default_settings
+
+        AuditEvidence.query.delete()
+        Violation.query.delete()
+        Ticket.query.delete()
+        CustomRule.query.delete()
+        Setting.query.delete()
+        db.session.commit()
+
+        _seed_default_settings()
+        return jsonify({"success": True, "message": "All database entries cleared and default settings restored."})
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 # ── Settings ──────────────────────────────────────────────────────────────────
 
@@ -607,3 +780,4 @@ def health_webhook():
     url = body.get("webhook_url") or settings.get("webhook_url", "")
     svc = NotificationService(settings)
     return jsonify(svc.test_webhook(url=url))
+

@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from copy import deepcopy
 from datetime import datetime
 from typing import Any
 
@@ -34,6 +35,7 @@ _progress: dict = {
     "evidence_total":    0,
     "evidence_done":     0,
     "violations_created": 0,
+    "recent_tickets":    [],
     "errors":            [],
     "result":            None,
 }
@@ -56,6 +58,49 @@ def _get_settings() -> dict[str, str]:
     from app.models.models import Setting
     rows = Setting.query.all()
     return {r.key: r.value for r in rows}
+
+
+def _parse_software_list(raw: str) -> list[str]:
+    """Parse comma/newline-separated software list from settings."""
+    if not raw:
+        return []
+    parts: list[str] = []
+    for line in raw.replace("\r", "\n").split("\n"):
+        for item in line.split(","):
+            val = item.strip()
+            if val:
+                parts.append(val)
+    # preserve order while de-duplicating
+    return list(dict.fromkeys(parts))
+
+
+def _parse_enabled_controls(raw: str) -> set[str]:
+    if not raw:
+        return set()
+    return {item.strip() for item in str(raw).split(",") if item.strip()}
+
+
+def _ticket_sort_key(ticket: dict) -> datetime:
+    """Best-effort timestamp extraction for newest-first processing."""
+    candidates = [
+        ticket.get("updated_at"),
+        ticket.get("closed_at"),
+        ticket.get("created_at"),
+        (ticket.get("_raw_snow") or {}).get("sys_updated_on"),
+        (ticket.get("_raw_snow") or {}).get("closed_at"),
+        (ticket.get("_raw_snow") or {}).get("sys_created_on"),
+    ]
+    for raw in candidates:
+        if not raw:
+            continue
+        try:
+            s = str(raw).strip().replace("Z", "+00:00")
+            if " " in s and "T" not in s:
+                s = s.replace(" ", "T")
+            return datetime.fromisoformat(s)
+        except Exception:
+            continue
+    return datetime.min
 
 
 class ComplianceEngine:
@@ -96,7 +141,7 @@ class ComplianceEngine:
             running=True, stage="Starting…",
             tickets_total=0, tickets_done=0,
             evidence_total=0, evidence_done=0,
-            violations_created=0, errors=[], result=None,
+            violations_created=0, recent_tickets=[], errors=[], result=None,
         )
         try:
             result = self._run_analysis(use_llm)
@@ -109,7 +154,20 @@ class ComplianceEngine:
             _analysis_lock.release()
 
     def _run_analysis(self, use_llm: bool = True) -> dict[str, Any]:
+        settings = _get_settings()
         config = current_app.config
+        runtime_config = dict(config)
+        runtime_controls = deepcopy(config.get("CONTROLS", {}))
+
+        enabled_controls = _parse_enabled_controls(settings.get("enabled_controls", ""))
+        if enabled_controls:
+            for key, value in runtime_controls.items():
+                value["enabled"] = key in enabled_controls
+        runtime_config["CONTROLS"] = runtime_controls
+
+        approved_software = _parse_software_list(settings.get("approved_software_list", ""))
+        if approved_software:
+            runtime_config["APPROVED_SOFTWARE"] = approved_software
 
         # 1 ── Fetch JIRA + ServiceNow tickets in parallel (both are HTTP I/O)
         _set(stage="Fetching tickets from JIRA & ServiceNow…")
@@ -123,9 +181,12 @@ class ComplianceEngine:
             *[{**t, "source": "JIRA"} for t in jira_tickets],
             *[{**t, "source": "ServiceNow"} for t in snow_tickets],
         ]
+        all_raw.sort(key=_ticket_sort_key, reverse=True)
+        eligible_raw = [t for t in all_raw if str(t.get("status", "")).strip().lower() in ("closed", "resolved")]
 
         stats: dict[str, Any] = {
             "tickets_fetched":       len(all_raw),
+            "tickets_checked":       len(eligible_raw),
             "tickets_new":           0,
             "violations_created":    0,
             "violations_by_severity": {"High": 0, "Medium": 0, "Low": 0},
@@ -135,18 +196,18 @@ class ComplianceEngine:
         }
 
         _set(
-            stage=f"Checking {len(all_raw)} tickets for violations…",
-            tickets_total=len(all_raw),
+            stage=f"Checking {len(eligible_raw)} closed/resolved tickets for violations…",
+            tickets_total=len(eligible_raw),
             tickets_done=0,
         )
 
         all_violations: list[dict] = []
         custom_rules = CustomRule.query.filter_by(enabled=True).all()
 
-        for raw in all_raw:
+        for raw in eligible_raw:
             try:
                 ticket_obj = self._upsert_ticket(raw)
-                new_violations = self._check_and_persist(ticket_obj, raw, config, custom_rules)
+                new_violations = self._check_and_persist(ticket_obj, raw, runtime_config, custom_rules)
                 # ── Commit after each ticket so the write lock is released immediately ──
                 db.session.commit()
                 all_violations.extend(new_violations)
@@ -167,6 +228,17 @@ class ComplianceEngine:
                 with _progress_lock:
                     _progress["tickets_done"] += 1
                     _progress["violations_created"] = stats["violations_created"]
+                    recent = list(_progress.get("recent_tickets") or [])
+                    recent.insert(
+                        0,
+                        {
+                            "ticket_key": raw.get("ticket_key"),
+                            "title": raw.get("title", ""),
+                            "source": raw.get("source", ""),
+                            "status": raw.get("status", ""),
+                        },
+                    )
+                    _progress["recent_tickets"] = recent[:30]
 
         # 2 ── LLM evidence generation (parallel HTTP calls, sequential DB writes)
         if use_llm and self.llm.is_available():
@@ -175,7 +247,6 @@ class ComplianceEngine:
         # 3 ── Notifications
         if all_violations:
             try:
-                settings = _get_settings()
                 NotificationService(settings).notify(all_violations)
             except Exception as exc:
                 logger.warning("Notification dispatch failed: %s", exc)
