@@ -11,7 +11,7 @@ from flask import Blueprint, current_app, jsonify, request, send_file, abort
 from sqlalchemy import func
 
 from app.extensions import db
-from app.models.models import AuditEvidence, CustomRule, Setting, Ticket, Violation
+from app.models.models import AuditEvidence, CustomRule, Setting, Ticket, TicketRuleAssessment, Violation
 
 api_bp = Blueprint("api", __name__)
 
@@ -58,12 +58,11 @@ def stats():
 
     # ── Compliance metrics ───────────────────────────────────────────────────
     analyzed_tickets = Ticket.query.filter(Ticket.analyzed_at.isnot(None)).count()
-    total_controls   = len(current_app.config.get("CONTROLS", {})) or 9
-
-    # Compliance Score: % of all possible ITGC checks that passed
-    # (avoids the old penalty formula that hits 0 with just a handful of violations)
-    total_possible = max(1, analyzed_tickets * total_controls)
-    compliance_score = round(max(0, (total_possible - total_violations) / total_possible * 100))
+    total_controls   = len(current_app.config.get("CONTROLS", {})) or 0
+    applicable_checks = TicketRuleAssessment.query.filter_by(applicable=True).count()
+    passed_checks = TicketRuleAssessment.query.filter_by(applicable=True, passed=True).count()
+    failed_checks = TicketRuleAssessment.query.filter_by(applicable=True, passed=False).count()
+    compliance_score = 100 if applicable_checks == 0 else round((passed_checks / applicable_checks) * 100)
 
     # Control Coverage: % of ingested tickets that have been analysed
     control_coverage = round(analyzed_tickets / max(1, total_tickets) * 100)
@@ -73,12 +72,12 @@ def stats():
     audit_readiness = 100 if total_violations == 0 else round(addressed / total_violations * 100)
 
     # Context numbers shown on the cards
-    tickets_with_open = (
-        db.session.query(func.count(func.distinct(Violation.ticket_id)))
-        .filter(Violation.status == "Open")
+    tickets_with_failed_checks = (
+        db.session.query(func.count(func.distinct(TicketRuleAssessment.ticket_id)))
+        .filter(TicketRuleAssessment.applicable.is_(True), TicketRuleAssessment.passed.is_(False))
         .scalar() or 0
     )
-    clean_tickets = analyzed_tickets - tickets_with_open
+    clean_tickets = max(0, analyzed_tickets - tickets_with_failed_checks)
 
     return jsonify(
         {
@@ -97,6 +96,9 @@ def stats():
             "clean_tickets":     clean_tickets,
             "addressed":         addressed,
             "total_controls":    total_controls,
+            "checks_applicable": applicable_checks,
+            "checks_passed":     passed_checks,
+            "checks_failed":     failed_checks,
         }
     )
 
@@ -105,7 +107,11 @@ def stats():
 def alerts():
     """Return the 25 most recent violations for the live alert feed."""
     rows = (
-        Violation.query.order_by(Violation.detected_at.desc()).limit(25).all()
+        Violation.query
+        .join(Ticket, Ticket.id == Violation.ticket_id)
+        .order_by(Ticket.ticket_key.desc(), Violation.detected_at.desc())
+        .limit(25)
+        .all()
     )
     return jsonify([v.to_dict() for v in rows])
 
@@ -114,6 +120,17 @@ def alerts():
 
 @api_bp.route("/analyze", methods=["POST"])
 def analyze():
+    payload = request.get_json(silent=True) or {}
+    from_date = (payload.get("from_date") or payload.get("date_from") or "").strip() or None
+    full_scan = bool(payload.get("full_scan") or payload.get("scan_all"))
+    if from_date:
+        try:
+            from datetime import date
+
+            date.fromisoformat(from_date)
+        except ValueError:
+            return jsonify({"started": False, "error": "Invalid from_date. Use YYYY-MM-DD."}), 400
+
     from app.agent.compliance_engine import get_progress
     if get_progress()["running"]:
         return jsonify({"started": False, "error": "Analysis already in progress"}), 409
@@ -127,7 +144,11 @@ def analyze():
                 from app.extensions import db as _db
                 from app.agent.compliance_engine import ComplianceEngine
                 try:
-                    ComplianceEngine().run_analysis(use_llm=True)
+                    ComplianceEngine().run_analysis(
+                        use_llm=True,
+                        from_date=from_date,
+                        full_scan=full_scan,
+                    )
                 finally:
                     try:
                         _db.session.remove()
@@ -155,7 +176,11 @@ def analyze_progress():
 def list_violations():
     severity = request.args.get("severity")
     status = request.args.get("status")
-    q = Violation.query.order_by(Violation.detected_at.desc())
+    q = (
+        Violation.query
+        .join(Ticket, Ticket.id == Violation.ticket_id)
+        .order_by(Ticket.ticket_key.desc(), Violation.detected_at.desc())
+    )
     if severity:
         q = q.filter_by(severity=severity)
     if status:

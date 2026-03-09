@@ -16,7 +16,7 @@
     <span class="font-mono text-xs font-bold text-brand-700">{{ ticket_key }}</span>
   {%- endif -%}
 {% endmacro %}
-{% block title %}Tickets – SOX Compliance{% endblock %}
+{% block title %}Tickets - SOX Compliance{% endblock %}
 {% block page_title %}Monitored Tickets{% endblock %}
 {% block page_subtitle %}All ingested tickets from JIRA and ServiceNow{% endblock %}
 
@@ -26,7 +26,7 @@
   <!-- Filters + Refresh -->
   <div class="mb-4 flex flex-wrap gap-3 items-center justify-between">
     <div class="flex flex-wrap gap-3 items-center">
-      <input x-model="search" type="text" placeholder="Search tickets…"
+      <input x-model="search" type="text" placeholder="Search tickets..."
         class="px-3 py-2 border border-slate-200 rounded-lg text-sm w-56 focus:outline-none focus:ring-2 focus:ring-brand-500" />
       <select x-model="sourceFilter"
         class="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
@@ -57,66 +57,8 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
             d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
         </svg>
-        <span x-text="running ? 'Analysing…' : 'Refresh & Analyse'"></span>
+        <span x-text="running ? 'Analysing...' : 'Refresh & Analyse'"></span>
       </button>
-    </div>
-  </div>
-
-  <!-- Progress card — visible from first click until page reloads or user starts again -->
-  <div x-show="active" x-cloak class="mb-4">
-    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-3">
-
-      <!-- Stage + counts -->
-      <div class="flex items-center justify-between">
-        <span class="text-sm font-medium text-slate-700" x-text="stage"></span>
-        <div class="flex gap-4 text-xs text-slate-500">
-          <span x-show="ticketsTotal > 0">
-            Tickets: <span class="font-semibold text-slate-700" x-text="ticketsDone + '/' + ticketsTotal"></span>
-          </span>
-          <span x-show="evidenceTotal > 0">
-            Evidence: <span class="font-semibold text-slate-700" x-text="evidenceDone + '/' + evidenceTotal"></span>
-          </span>
-          <span x-show="violations > 0">
-            Violations: <span class="font-semibold text-red-600" x-text="violations"></span>
-          </span>
-        </div>
-      </div>
-
-      <!-- Progress bar -->
-      <div class="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
-        <div class="h-2.5 rounded-full transition-all duration-500"
-          :class="doneOk ? 'bg-teal-500' : (doneMsg && !doneOk ? 'bg-red-500' : 'bg-teal-500')"
-          :style="'width: ' + progressPct + '%'"></div>
-      </div>
-
-      <!-- Error list -->
-      <div x-show="errors.length > 0" class="space-y-1">
-        <template x-for="(e, i) in errors" :key="i">
-          <div class="flex items-start gap-1.5 text-xs text-red-600 bg-red-50 rounded px-2 py-1">
-            <span class="mt-0.5 flex-shrink-0">⚠</span>
-            <span x-text="e"></span>
-          </div>
-        </template>
-      </div>
-
-      <!-- Done banner -->
-      <div x-show="doneMsg" class="text-sm font-medium px-3 py-2 rounded-lg"
-        :class="doneOk ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'"
-        x-text="doneMsg"></div>
-
-      <!-- Recently checked tickets (live) -->
-      <div x-show="recentTickets.length > 0" class="pt-2 border-t border-slate-100">
-        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Recently Checked</p>
-        <div class="max-h-44 overflow-auto space-y-1">
-          <template x-for="(t, i) in recentTickets" :key="i">
-            <div class="flex items-center justify-between text-xs px-2 py-1 rounded bg-slate-50">
-              <span class="font-mono text-slate-700" x-text="t.ticket_key || 'N/A'"></span>
-              <span class="text-slate-500 truncate px-2 flex-1" x-text="t.title || ''"></span>
-              <span class="text-slate-400" x-text="(t.source || '') + ' · ' + (t.status || '')"></span>
-            </div>
-          </template>
-        </div>
-      </div>
     </div>
   </div>
 
@@ -130,13 +72,20 @@
           <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Source</th>
           <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Status</th>
           <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Priority</th>
+          <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Passed</th>
+          <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Failed</th>
           <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Violations</th>
           <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Analysed</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-slate-50">
         {% for t in tickets %}
-        {% set vc = t.violations|length %}
+        {% set assessments = t.rule_assessments|list %}
+        {% set applicable_checks = assessments | selectattr('applicable') | list %}
+        {% set passed_checks = applicable_checks | selectattr('passed') | list %}
+        {% set failed_checks = applicable_checks | rejectattr('passed') | list %}
+        {% set vc = failed_checks|length %}
+        {% set passed_count = passed_checks|length %}
         <tr class="hover:bg-slate-50 transition-colors"
           x-show="
             (sourceFilter === 'all' || sourceFilter === '{{ t.source }}') &&
@@ -149,11 +98,63 @@
             (search === '' || '{{ t.ticket_key|lower }} {{ t.title|lower }}'.includes(search.toLowerCase()))
           ">
           <td class="px-4 py-3">
-            {{ ticket_link(t.ticket_key, t.source) }}
+            <div class="relative group inline-block" x-data="{ mode: 'passed' }" @mouseenter="mode = 'passed'">
+              {{ ticket_link(t.ticket_key, t.source) }}
+              <div class="absolute left-0 z-50 hidden group-hover:block w-80
+                {% if loop.revindex <= 3 %}bottom-full mb-1{% else %}top-full mt-1{% endif %}
+                bg-emerald-950 text-emerald-100 text-xs rounded-lg shadow-xl p-3 space-y-2">
+                <div class="flex items-center justify-between gap-2 mb-1">
+                  <p class="font-semibold uppercase tracking-wider text-[10px] text-emerald-300">Check Results</p>
+                  <div class="inline-flex rounded-md border border-emerald-700 overflow-hidden">
+                    <button type="button"
+                      @click="mode = 'passed'"
+                      :class="mode === 'passed' ? 'bg-emerald-500 text-emerald-950' : 'bg-transparent text-emerald-200 hover:bg-emerald-900'"
+                      class="px-2 py-0.5 text-[10px] font-semibold transition-colors">Passed</button>
+                    <button type="button"
+                      @click="mode = 'failed'"
+                      :class="mode === 'failed' ? 'bg-red-400 text-red-950' : 'bg-transparent text-emerald-200 hover:bg-emerald-900'"
+                      class="px-2 py-0.5 text-[10px] font-semibold transition-colors">Failed</button>
+                  </div>
+                </div>
+
+                <div x-show="mode === 'passed'" x-cloak class="space-y-2">
+                  {% if passed_checks|length > 0 %}
+                    {% for c in passed_checks %}
+                      <div class="flex items-start gap-2">
+                        <span class="mt-0.5 w-2 h-2 rounded-full flex-shrink-0 bg-emerald-400"></span>
+                        <div>
+                          <p class="font-mono text-[10px] text-emerald-300">{{ c.control_id }}</p>
+                          <p class="leading-snug text-emerald-100">{{ c.control_name or c.control_key }}</p>
+                        </div>
+                      </div>
+                    {% endfor %}
+                  {% else %}
+                    <p class="text-emerald-200">No passed checks for this ticket.</p>
+                  {% endif %}
+                </div>
+
+                <div x-show="mode === 'failed'" x-cloak class="space-y-2">
+                  {% if failed_checks|length > 0 %}
+                    {% for v in failed_checks %}
+                    <div class="flex items-start gap-2">
+                      <span class="mt-0.5 w-2 h-2 rounded-full flex-shrink-0
+                        {% if v.severity == 'High' %}bg-red-400{% elif v.severity == 'Medium' %}bg-amber-300{% else %}bg-blue-300{% endif %}"></span>
+                      <div>
+                        <p class="font-mono text-[10px] text-emerald-300">{{ v.control_id }} | {{ v.severity }}</p>
+                        <p class="leading-snug text-emerald-100">{{ v.control_name or v.control_key or 'Failed Control' }}</p>
+                      </div>
+                    </div>
+                    {% endfor %}
+                  {% else %}
+                    <p class="text-emerald-200">No failed checks for this ticket.</p>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
           </td>
           <td class="px-4 py-3">
             <p class="text-sm text-slate-800 max-w-xs truncate" title="{{ t.title }}">{{ t.title }}</p>
-            <p class="text-xs text-slate-400">{{ t.ticket_type or '—' }}</p>
+            <p class="text-xs text-slate-400">{{ t.ticket_type or '-' }}</p>
           </td>
           <td class="px-4 py-3">
             <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium
@@ -170,34 +171,45 @@
             </span>
           </td>
           <td class="px-4 py-3">
-            <span class="text-xs text-slate-600">{{ t.priority or '—' }}</span>
+            <span class="text-xs text-slate-600">{{ t.priority or '-' }}</span>
+          </td>
+          <td class="px-4 py-3">
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-700">
+              {{ passed_count }}
+            </span>
+          </td>
+          <td class="px-4 py-3">
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">
+              {{ vc }}
+            </span>
           </td>
           <td class="px-4 py-3">
             {% if vc > 0 %}
               <div class="relative group inline-block">
                 <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700 cursor-default">
-                  ⚠ {{ vc }}
+                  ! {{ vc }}
                 </span>
                 <!-- Hover tooltip listing violations -->
-                <div class="absolute left-0 top-full mt-1 z-50 hidden group-hover:block w-72
+                <div class="absolute left-0 z-50 hidden group-hover:block w-72
+                  {% if loop.revindex <= 3 %}bottom-full mb-1{% else %}top-full mt-1{% endif %}
                   bg-slate-900 text-white text-xs rounded-lg shadow-xl p-3 space-y-2">
                   <p class="font-semibold text-slate-300 uppercase tracking-wider text-[10px] mb-1">Violations ({{ vc }})</p>
-                  {% for v in t.violations %}
+                  {% for v in failed_checks %}
                   <div class="flex items-start gap-2">
                     <span class="mt-0.5 w-2 h-2 rounded-full flex-shrink-0
                       {% if v.severity == 'High' %}bg-red-400
                       {% elif v.severity == 'Medium' %}bg-amber-400
                       {% else %}bg-blue-400{% endif %}"></span>
                     <div>
-                      <p class="font-mono text-[10px] text-slate-400">{{ v.control_id }} · {{ v.severity }}</p>
-                      <p class="text-slate-200 leading-snug">{{ v.violation_type.replace('_', ' ').title() }}</p>
+                      <p class="font-mono text-[10px] text-slate-400">{{ v.control_id }} | {{ v.severity }}</p>
+                      <p class="text-slate-200 leading-snug">{{ v.control_name or v.control_key or 'Failed Control' }}</p>
                     </div>
                   </div>
                   {% endfor %}
                 </div>
               </div>
             {% else %}
-              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">✓ Clean</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">OK Clean</span>
             {% endif %}
           </td>
           <td class="px-4 py-3 text-xs text-slate-400">
@@ -210,7 +222,7 @@
         </tr>
         {% else %}
         <tr>
-          <td colspan="7" class="px-4 py-10 text-center text-slate-400 text-sm">
+          <td colspan="9" class="px-4 py-10 text-center text-slate-400 text-sm">
             No tickets found. Run an analysis from the Dashboard to ingest data.
           </td>
         </tr>
@@ -243,6 +255,7 @@ function ticketsPage() {
     doneMsg: '',
     doneOk: true,
     _timer: null,
+    _watchTimer: null,
 
     init() {
       // Resume progress bar if analysis is already running (e.g. page reload mid-run)
@@ -254,14 +267,25 @@ function ticketsPage() {
           this._startPoll();
         }
       });
+      this._watchTimer = setInterval(() => {
+        if (this.running) return;
+        fetch('/api/analyze/progress').then(r => r.json()).then(p => {
+          if (!p.running) return;
+          this.active = true;
+          this.running = true;
+          this._seenRunning = true;
+          this._applyProgress(p);
+          this._startPoll();
+        }).catch(() => {});
+      }, 1200);
     },
 
     startAnalysis() {
-      this.active = true;       // card stays visible from now on — never hidden again
+      this.active = true;       // card stays visible from now on - never hidden again
       this.running = true;
       this._seenRunning = false; // reset so first poll doesn't fire a false finish
       this.doneMsg = '';
-      this.stage = 'Starting…';
+      this.stage = 'Starting...';
       this.ticketsDone = 0; this.ticketsTotal = 0;
       this.evidenceDone = 0; this.evidenceTotal = 0;
       this.violations = 0; this.errors = [];
@@ -292,7 +316,7 @@ function ticketsPage() {
           // Track that we've seen at least one running=true response
           if (p.running) this._seenRunning = true;
           this._applyProgress(p);
-          // Only treat as finished after confirming it was running — avoids the
+          // Only treat as finished after confirming it was running - avoids the
           // race where the first poll fires before the background thread sets running=true
           if (!p.running && this._seenRunning) {
             clearInterval(this._timer);
@@ -300,8 +324,8 @@ function ticketsPage() {
             if (p.result) {
               this.doneOk = true;
               const r = p.result;
-              this.doneMsg = r.tickets_fetched + ' ticket(s) fetched · ' +
-                r.violations_created + ' new violation(s) · ' +
+              this.doneMsg = r.tickets_fetched + ' ticket(s) fetched | ' +
+                r.violations_created + ' new violation(s) | ' +
                 r.llm_analyses + ' evidence record(s) generated';
               setTimeout(() => location.reload(), 2500);
             } else {
@@ -330,10 +354,10 @@ function ticketsPage() {
     get progressPct() {
       if (!this.active) return 0;
       if (this.doneMsg) return 100;
-      // stage 1: ticket checking 0–50%
+      // stage 1: ticket checking 0-50%
       if (this.ticketsTotal > 0 && this.evidenceTotal === 0)
         return Math.max(5, Math.round(this.ticketsDone / this.ticketsTotal * 50));
-      // stage 2: evidence generation 50–95%
+      // stage 2: evidence generation 50-95%
       if (this.evidenceTotal > 0)
         return 50 + Math.round(this.evidenceDone / this.evidenceTotal * 45);
       return 5;
@@ -342,3 +366,4 @@ function ticketsPage() {
 }
 </script>
 {% endblock %}
+

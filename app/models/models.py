@@ -39,6 +39,12 @@ class Ticket(db.Model):
     violations: Mapped[list[Violation]] = relationship(
         "Violation", back_populates="ticket", cascade="all, delete-orphan"
     )
+    rule_assessments: Mapped[list[TicketRuleAssessment]] = relationship(
+        "TicketRuleAssessment",
+        back_populates="ticket",
+        cascade="all, delete-orphan",
+        order_by="TicketRuleAssessment.control_id",
+    )
 
     def to_dict(self) -> dict:
         return {
@@ -56,6 +62,7 @@ class Ticket(db.Model):
             "created_at": self.created_at.isoformat(),
             "analyzed_at": self.analyzed_at.isoformat() if self.analyzed_at else None,
             "violation_count": len(self.violations),
+            "rule_assessment_count": len(self.rule_assessments),
         }
 
 
@@ -92,6 +99,45 @@ class Violation(db.Model):
             "severity": self.severity,
             "status": self.status,
             "detected_at": self.detected_at.isoformat(),
+        }
+
+
+class TicketRuleAssessment(db.Model):
+    """Per-ticket, per-control LLM assessment result (applicable/pass/fail)."""
+
+    __tablename__ = "ticket_rule_assessments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    ticket_id: Mapped[str] = mapped_column(String(36), ForeignKey("tickets.id"), index=True)
+    control_key: Mapped[str] = mapped_column(String(100), index=True)
+    control_id: Mapped[str] = mapped_column(String(50), index=True)
+    control_name: Mapped[str] = mapped_column(String(200))
+    severity: Mapped[str] = mapped_column(String(20))
+    applicable: Mapped[bool] = mapped_column(default=True)
+    passed: Mapped[bool] = mapped_column(default=False)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    evidence: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    raw_result: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    ticket: Mapped[Ticket] = relationship("Ticket", back_populates="rule_assessments")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "ticket_id": self.ticket_id,
+            "ticket_key": self.ticket.ticket_key if self.ticket else None,
+            "control_key": self.control_key,
+            "control_id": self.control_id,
+            "control_name": self.control_name,
+            "severity": self.severity,
+            "applicable": bool(self.applicable),
+            "passed": bool(self.passed),
+            "failed": bool(self.applicable and not self.passed),
+            "reason": self.reason or "",
+            "evidence": self.evidence or {},
+            "raw_result": self.raw_result or {},
+            "evaluated_at": self.evaluated_at.isoformat(),
         }
 
 

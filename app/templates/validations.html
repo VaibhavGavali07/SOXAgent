@@ -17,15 +17,15 @@
       <span x-text="rules.filter(r=>r.enabled).length"></span> active
     </p>
     <button @click="openForm()"
-      class="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-lg transition-colors">
+      class="inline-flex items-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-700 border border-teal-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors">
       New Validation Rule
     </button>
   </div>
 
   <div class="mb-6 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
     <div class="px-5 py-4 bg-slate-50 border-b border-slate-100">
-      <h3 class="text-sm font-semibold text-slate-700">ITGC-SW-01 Allowed Software</h3>
-      <p class="text-xs text-slate-400 mt-0.5">Define approved software list used by Unauthorized Software Installation checks.</p>
+      <h3 class="text-sm font-semibold text-slate-700">ITGC-SW-01 Authorized Software List</h3>
+      <p class="text-xs text-slate-400 mt-0.5">Define authorized/approved software used by Unauthorized Software checks.</p>
     </div>
     <div class="p-5 space-y-3">
       <textarea x-model="approvedSoftwareText" rows="6"
@@ -34,8 +34,8 @@
       <div class="flex items-center justify-between">
         <p class="text-xs text-slate-400">Example: Microsoft Office 365, Zoom, Slack, Visual Studio Code</p>
         <button @click="saveApprovedSoftware()" :disabled="savingSoftware"
-          class="px-4 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white text-sm font-medium rounded-lg transition-colors">
-          <span x-text="savingSoftware ? 'Saving...' : 'Save Allowed Software'"></span>
+          class="px-4 py-2 bg-teal-600 hover:bg-teal-700 border border-teal-700 disabled:opacity-60 text-white text-sm font-medium rounded-lg shadow-sm transition-colors">
+          <span x-text="savingSoftware ? 'Saving...' : 'Save Authorized Software List'"></span>
         </button>
       </div>
     </div>
@@ -247,7 +247,7 @@
 </div>
 
 <button @click="openForm()"
-  class="fixed bottom-6 right-6 z-40 inline-flex items-center gap-2 px-4 py-3 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold rounded-full shadow-lg transition-colors">
+  class="fixed bottom-6 right-6 z-40 inline-flex items-center gap-2 px-4 py-3 bg-teal-600 hover:bg-teal-700 border border-teal-700 text-white text-sm font-semibold rounded-full shadow-lg transition-colors">
   + Add Rule
 </button>
 {% endblock %}
@@ -314,7 +314,7 @@ function validationsPage() {
           body: JSON.stringify({ approved_software_list: this.approvedSoftwareText }),
         });
         const data = await r.json();
-        this.flash(data.success ? 'Saved allowed software list.' : ('Error: ' + (data.error || 'Unknown')), !data.success);
+        this.flash(data.success ? 'Saved authorized software list.' : ('Error: ' + (data.error || 'Unknown')), !data.success);
       } catch (e) {
         this.flash('Network error: ' + e.message, true);
       } finally {

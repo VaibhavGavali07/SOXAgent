@@ -13,13 +13,13 @@
     </div>
     <div class="flex gap-3">
       <button @click="runAnalysis()"
-        :disabled="analysing"
+        :disabled="analysing || globalRunning"
         class="inline-flex items-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white text-sm font-medium rounded-lg transition-colors">
-        <svg class="w-4 h-4" :class="analysing ? 'animate-spin' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-4 h-4" :class="(analysing || globalRunning) ? 'animate-spin' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
             d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
         </svg>
-        <span x-text="analysing ? 'Fetching…' : 'Refresh Data'"></span>
+        <span x-text="(analysing || globalRunning) ? 'Fetching...' : 'Refresh Data'"></span>
       </button>
     </div>
   </div>
@@ -108,7 +108,7 @@
       </p>
       <p class="mt-1.5 text-xs text-slate-400"
         x-show="stats.analyzed_tickets != null"
-        x-text="stats.total_violations + ' violation(s) across ' + (stats.analyzed_tickets * stats.total_controls) + ' checks run'">
+        x-text="(stats.checks_failed || 0) + ' failed of ' + (stats.checks_applicable || 0) + ' applicable checks (' + (stats.checks_passed || 0) + ' passed)'">
       </p>
     </div>
 
@@ -360,6 +360,8 @@ function dashboard() {
     stats: {},
     alerts: [],
     analysing: false,
+    globalRunning: false,
+    _analysisWatch: null,
     lastRefresh: null,
     resultMsg: '',
     resultError: false,
@@ -368,8 +370,10 @@ function dashboard() {
     snowUrl: '{{ snow_url }}',
 
     async init() {
+      await this.syncAnalysisState();
       await this.loadStats();
       await this.loadAlerts();
+      this._analysisWatch = setInterval(() => this.syncAnalysisState(), 1200);
     },
 
     async loadStats() {
@@ -384,7 +388,20 @@ function dashboard() {
       this.alerts = await r.json();
     },
 
+    async syncAnalysisState() {
+      try {
+        const r = await fetch('/api/analyze/progress');
+        const p = await r.json();
+        this.globalRunning = !!p.running;
+      } catch (_) {}
+    },
+
     async runAnalysis() {
+      if (this.globalRunning) {
+        this.resultError = true;
+        this.resultMsg = 'Analysis already in progress.';
+        return;
+      }
       this.analysing = true;
       this.resultMsg = '';
       this.execSummary = '';
@@ -438,7 +455,7 @@ function dashboard() {
       if (alert.ticket_source === 'JIRA' && this.jiraUrl)
         return this.jiraUrl + '/browse/' + alert.ticket_key;
       if (alert.ticket_source === 'ServiceNow' && this.snowUrl)
-        return this.snowUrl + '/change_request.do?sysparm_query=number=' + alert.ticket_key;
+        return this.snowUrl + '/incident.do?sysparm_query=number=' + alert.ticket_key;
       return '';
     },
 
@@ -455,3 +472,5 @@ function dashboard() {
 }
 </script>
 {% endblock %}
+
+

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from flask import Blueprint, render_template, current_app
 from sqlalchemy import func
+from sqlalchemy.orm import joinedload
 
 from app.extensions import db
 from app.models.models import AuditEvidence, Setting, Ticket, Violation
@@ -25,13 +26,37 @@ def dashboard():
 
 @main_bp.route("/tickets")
 def tickets():
-    all_tickets = Ticket.query.order_by(Ticket.created_at.desc()).all()
-    return render_template("tickets.html", tickets=all_tickets, **_source_urls())
+    all_tickets = (
+        Ticket.query
+        .options(joinedload(Ticket.rule_assessments), joinedload(Ticket.violations))
+        .order_by(Ticket.ticket_key.desc())
+        .all()
+    )
+
+    enabled_row = Setting.query.filter_by(key="enabled_controls").first()
+    enabled_keys = {item.strip() for item in (enabled_row.value if enabled_row else "").split(",") if item.strip()}
+    controls_cfg = current_app.config.get("CONTROLS", {})
+    enabled_controls: list[dict[str, str]] = []
+    for key, value in controls_cfg.items():
+        is_enabled = (key in enabled_keys) if enabled_keys else bool(value.get("enabled", True))
+        if not is_enabled:
+            continue
+        enabled_controls.append({
+            "id": value.get("id", key),
+            "name": value.get("name", key.replace("_", " ").title()),
+        })
+
+    return render_template("tickets.html", tickets=all_tickets, enabled_controls=enabled_controls, **_source_urls())
 
 
 @main_bp.route("/violations")
 def violations():
-    all_violations = Violation.query.order_by(Violation.detected_at.desc()).all()
+    all_violations = (
+        Violation.query
+        .join(Ticket, Ticket.id == Violation.ticket_id)
+        .order_by(Ticket.ticket_key.desc(), Violation.detected_at.desc())
+        .all()
+    )
     return render_template("violations.html", violations=all_violations, **_source_urls())
 
 

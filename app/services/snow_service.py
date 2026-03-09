@@ -38,12 +38,20 @@ def _map_ticket(raw: dict) -> dict:
     return {
         "ticket_key": _val(raw.get("number")),
         "title": _val(raw.get("short_description")),
+        "description": _val(raw.get("description") or raw.get("u_description")),
         "status": status,
         "priority": priority,
         "ticket_type": ticket_type,
         "requestor_id": _val(raw.get("caller_id") or raw.get("opened_by")),
         "approver_id": _val(raw.get("approved_by") or raw.get("approval")),
         "implementer_id": _val(raw.get("assigned_to")),
+        "resolution_note": _val(
+            raw.get("resolution_note")
+            or raw.get("resolution_notes")
+            or raw.get("u_resolution_note")
+            or raw.get("close_notes")
+        ),
+        "close_code": _val(raw.get("close_code")),
         "documentation_link": _val(raw.get("close_notes") or raw.get("work_notes")),
         "tags": [],
         "_raw_snow": raw,  # preserve original for debugging

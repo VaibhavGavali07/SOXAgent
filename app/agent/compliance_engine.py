@@ -1,5 +1,5 @@
 """
-ComplianceEngine – orchestrates fetching, checking, persisting, and LLM analysis.
+ComplianceEngine â€“ orchestrates fetching, checking, persisting, and LLM analysis.
 """
 from __future__ import annotations
 
@@ -7,14 +7,15 @@ import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, date
 from typing import Any
 
 from flask import current_app
 
 from app.extensions import db
-from app.models.models import AuditEvidence, CustomRule, Ticket, Violation
-from app.agent.checks import run_all_checks, run_custom_rules
+from app.models.models import AuditEvidence, Ticket, TicketRuleAssessment, Violation
+from app.agent.checks import run_all_checks
+from app.agent.comment_rule_evaluator import CommentRuleEvaluator
 from app.agent.llm_client import LLMClient
 from app.agent.prompts import SYSTEM_PROMPT, build_violation_analysis_prompt, build_batch_summary_prompt
 from app.services.jira_service import JiraService
@@ -24,8 +25,12 @@ from app.services.notification_service import NotificationService
 logger = logging.getLogger(__name__)
 
 _LLM_WORKERS = 5  # concurrent LLM calls
+_LLM_UNAVAILABLE_NOTICE = (
+    "[LLM analysis unavailable - no API key configured. "
+    "Add your API key on the Connections page to enable AI-powered narrative analysis.]"
+)
 
-# ── Progress tracking (updated live, polled by frontend) ─────────────────────
+# â”€â”€ Progress tracking (updated live, polled by frontend) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 _progress_lock = threading.Lock()
 _progress: dict = {
     "running":           False,
@@ -103,6 +108,13 @@ def _ticket_sort_key(ticket: dict) -> datetime:
     return datetime.min
 
 
+def _ticket_date(ticket: dict) -> date | None:
+    dt = _ticket_sort_key(ticket)
+    if dt == datetime.min:
+        return None
+    return dt.date()
+
+
 class ComplianceEngine:
     """
     Orchestrates the full ITGC compliance analysis pipeline:
@@ -132,19 +144,24 @@ class ComplianceEngine:
             client_name=settings.get("snow_client_name", ""),
         )
 
-    # ─────────────────────────────────────────────────────────────────────────
-    def run_analysis(self, use_llm: bool = True) -> dict[str, Any]:
-        """Full pipeline – fetch all tickets and analyse them."""
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    def run_analysis(
+        self,
+        use_llm: bool = True,
+        from_date: str | None = None,
+        full_scan: bool = False,
+    ) -> dict[str, Any]:
+        """Full pipeline â€“ fetch all tickets and analyse them."""
         if not _analysis_lock.acquire(blocking=False):
             raise RuntimeError("An analysis is already in progress. Please wait and try again.")
         _set(
-            running=True, stage="Starting…",
+            running=True, stage="Starting...",
             tickets_total=0, tickets_done=0,
             evidence_total=0, evidence_done=0,
             violations_created=0, recent_tickets=[], errors=[], result=None,
         )
         try:
-            result = self._run_analysis(use_llm)
+            result = self._run_analysis(use_llm=use_llm, from_date=from_date, full_scan=full_scan)
             _set(running=False, stage="Done", result=result)
             return result
         except Exception as exc:
@@ -153,7 +170,12 @@ class ComplianceEngine:
         finally:
             _analysis_lock.release()
 
-    def _run_analysis(self, use_llm: bool = True) -> dict[str, Any]:
+    def _run_analysis(
+        self,
+        use_llm: bool = True,
+        from_date: str | None = None,
+        full_scan: bool = False,
+    ) -> dict[str, Any]:
         settings = _get_settings()
         config = current_app.config
         runtime_config = dict(config)
@@ -168,9 +190,11 @@ class ComplianceEngine:
         approved_software = _parse_software_list(settings.get("approved_software_list", ""))
         if approved_software:
             runtime_config["APPROVED_SOFTWARE"] = approved_software
+        runtime_config["COMMENT_RULE_EVALUATOR"] = CommentRuleEvaluator(self.llm)
+        runtime_config["TICKET_RULE_EVALUATOR"] = runtime_config["COMMENT_RULE_EVALUATOR"]
 
-        # 1 ── Fetch JIRA + ServiceNow tickets in parallel (both are HTTP I/O)
-        _set(stage="Fetching tickets from JIRA & ServiceNow…")
+        # 1 â”€â”€ Fetch JIRA + ServiceNow tickets in parallel (both are HTTP I/O)
+        _set(stage="Fetching tickets from JIRA & ServiceNow...")
         with ThreadPoolExecutor(max_workers=2) as pool:
             jira_future = pool.submit(self.jira.get_tickets)
             snow_future = pool.submit(self.snow.get_tickets)
@@ -184,31 +208,61 @@ class ComplianceEngine:
         all_raw.sort(key=_ticket_sort_key, reverse=True)
         eligible_raw = [t for t in all_raw if str(t.get("status", "")).strip().lower() in ("closed", "resolved")]
 
+        existing_scan_map: dict[str, Any] = {
+            t.ticket_key: t.analyzed_at
+            for t in Ticket.query.with_entities(Ticket.ticket_key, Ticket.analyzed_at).all()
+        }
+
+        parsed_from_date: date | None = None
+        if from_date:
+            try:
+                parsed_from_date = date.fromisoformat(str(from_date).strip())
+            except ValueError as exc:
+                raise ValueError("Invalid from_date format. Use YYYY-MM-DD.") from exc
+
+        if parsed_from_date:
+            filtered_raw = [
+                t for t in eligible_raw
+                if (_ticket_date(t) is not None and _ticket_date(t) >= parsed_from_date)
+            ]
+            scan_mode = "from_date"
+        elif full_scan:
+            filtered_raw = eligible_raw
+            scan_mode = "full_scan"
+        else:
+            # Default incremental mode: scan only tickets never analyzed before.
+            filtered_raw = [
+                t for t in eligible_raw
+                if not existing_scan_map.get(str(t.get("ticket_key", "")).strip())
+            ]
+            scan_mode = "incremental"
+
         stats: dict[str, Any] = {
             "tickets_fetched":       len(all_raw),
-            "tickets_checked":       len(eligible_raw),
-            "tickets_new":           0,
+            "tickets_eligible":      len(eligible_raw),
+            "tickets_checked":       len(filtered_raw),
+            "tickets_new":           sum(1 for t in filtered_raw if str(t.get("ticket_key", "")) not in existing_scan_map),
             "violations_created":    0,
             "violations_by_severity": {"High": 0, "Medium": 0, "Low": 0},
             "violations_by_type":    {},
             "llm_analyses":          0,
             "errors":                [],
+            "scan_mode":             scan_mode,
+            "from_date":             parsed_from_date.isoformat() if parsed_from_date else None,
         }
 
         _set(
-            stage=f"Checking {len(eligible_raw)} closed/resolved tickets for violations…",
-            tickets_total=len(eligible_raw),
+            stage=f"Checking {len(filtered_raw)} closed/resolved tickets for violations...",
+            tickets_total=len(filtered_raw),
             tickets_done=0,
         )
 
         all_violations: list[dict] = []
-        custom_rules = CustomRule.query.filter_by(enabled=True).all()
-
-        for raw in eligible_raw:
+        for raw in filtered_raw:
             try:
                 ticket_obj = self._upsert_ticket(raw)
-                new_violations = self._check_and_persist(ticket_obj, raw, runtime_config, custom_rules)
-                # ── Commit after each ticket so the write lock is released immediately ──
+                new_violations = self._check_and_persist(ticket_obj, raw, runtime_config)
+                # â”€â”€ Commit after each ticket so the write lock is released immediately â”€â”€
                 db.session.commit()
                 all_violations.extend(new_violations)
                 stats["violations_created"] += len(new_violations)
@@ -240,19 +294,19 @@ class ComplianceEngine:
                     )
                     _progress["recent_tickets"] = recent[:30]
 
-        # 2 ── LLM evidence generation (parallel HTTP calls, sequential DB writes)
-        if use_llm and self.llm.is_available():
+        # 2 â”€â”€ LLM evidence generation (parallel HTTP calls, sequential DB writes)
+        if use_llm:
             stats["llm_analyses"] = self._generate_evidence_parallel()
 
-        # 3 ── Notifications
+        # 3 â”€â”€ Notifications
         if all_violations:
             try:
                 NotificationService(settings).notify(all_violations)
             except Exception as exc:
                 logger.warning("Notification dispatch failed: %s", exc)
 
-        # 4 ── Executive summary
-        _set(stage="Generating executive summary…")
+        # 4 â”€â”€ Executive summary
+        _set(stage="Generating executive summary...")
         if all_violations:
             stats["executive_summary"] = self._batch_summary(all_violations)
         else:
@@ -261,7 +315,7 @@ class ComplianceEngine:
         db.session.commit()
         return stats
 
-    # ─────────────────────────────────────────────────────────────────────────
+    # â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     def _upsert_ticket(self, raw: dict) -> Ticket:
         existing = Ticket.query.filter_by(ticket_key=raw["ticket_key"]).first()
         if existing:
@@ -292,17 +346,40 @@ class ComplianceEngine:
         return ticket
 
     def _check_and_persist(
-        self, ticket_obj: Ticket, raw: dict, config: Any, custom_rules: list = ()
+        self, ticket_obj: Ticket, raw: dict, config: Any
     ) -> list[dict]:
-        """Run all checks; skip violation types already recorded for this ticket."""
-        existing_types = {v.violation_type for v in ticket_obj.violations}
+        """Run checks and replace stored per-ticket outcomes with latest run."""
+        # Re-scan semantics: replace stale violations and stale per-control assessments.
+        for v in list(ticket_obj.violations):
+            db.session.delete(v)
+        for a in list(ticket_obj.rule_assessments):
+            db.session.delete(a)
+        db.session.flush()
+
         results = run_all_checks(raw, config)
-        results.extend(run_custom_rules(raw, custom_rules))
         persisted: list[dict] = []
 
+        assessment_payload = raw.get("_llm_rule_assessment") if isinstance(raw, dict) else None
+        checks = assessment_payload.get("checks") if isinstance(assessment_payload, dict) else None
+        if isinstance(checks, list):
+            for entry in checks:
+                if not isinstance(entry, dict):
+                    continue
+                ra = TicketRuleAssessment(
+                    ticket_id=ticket_obj.id,
+                    control_key=str(entry.get("control_key") or ""),
+                    control_id=str(entry.get("control_id") or ""),
+                    control_name=str(entry.get("control_name") or ""),
+                    severity=str(entry.get("severity") or "Medium"),
+                    applicable=bool(entry.get("applicable", True)),
+                    passed=bool(entry.get("passed", False)),
+                    reason=str(entry.get("reason") or "").strip() or None,
+                    evidence={"items": entry.get("evidence") if isinstance(entry.get("evidence"), list) else []},
+                    raw_result=entry,
+                )
+                db.session.add(ra)
+
         for r in results:
-            if r.violation_type in existing_types:
-                continue
             v = Violation(
                 ticket_id=ticket_obj.id,
                 control_id=r.control_id,
@@ -312,7 +389,6 @@ class ComplianceEngine:
             )
             db.session.add(v)
             db.session.flush()
-            existing_types.add(r.violation_type)
             persisted.append({
                 **v.to_dict(),
                 "ticket_key":   ticket_obj.ticket_key,
@@ -329,7 +405,7 @@ class ComplianceEngine:
 
         Strategy:
           1. Read all needed data from DB in the main thread.
-          2. Fire LLM calls concurrently (_LLM_WORKERS at a time) — pure HTTP, no DB.
+          2. Fire LLM calls concurrently (_LLM_WORKERS at a time) â€” pure HTTP, no DB.
           3. Write all results to DB sequentially in the main thread.
 
         Returns the number of evidence records created.
@@ -344,12 +420,12 @@ class ComplianceEngine:
             return 0
 
         _set(
-            stage=f"Generating AI evidence for {len(unevidenced)} violation(s)…",
+            stage=f"Generating AI evidence for {len(unevidenced)} violation(s)...",
             evidence_total=len(unevidenced),
             evidence_done=0,
         )
 
-        # ── Step 1: collect all data for LLM prompts (DB reads, main thread only)
+        # â”€â”€ Step 1: collect all data for LLM prompts (DB reads, main thread only)
         jobs: list[dict] = []
         for v_obj in unevidenced:
             ticket_obj = Ticket.query.get(v_obj.ticket_id)
@@ -363,13 +439,15 @@ class ComplianceEngine:
                 "prompt":       build_violation_analysis_prompt(v_dict, ticket_raw),
             })
 
-        # ── Step 2: fire all LLM calls in parallel (I/O-bound, no DB access)
+        # â”€â”€ Step 2: fire all LLM calls in parallel (I/O-bound, no DB access)
         def _call_llm(job: dict) -> dict:
             analysis = self.llm.analyze(system=SYSTEM_PROMPT, user=job["prompt"])
+            if not str(analysis or "").strip():
+                analysis = _LLM_UNAVAILABLE_NOTICE
             with _progress_lock:
                 _progress["evidence_done"] += 1
                 _progress["stage"] = (
-                    f"Generating AI evidence… "
+                    f"Generating AI evidence... "
                     f"{_progress['evidence_done']}/{_progress['evidence_total']}"
                 )
             return {**job, "analysis": analysis}
@@ -383,7 +461,7 @@ class ComplianceEngine:
                 except Exception as exc:
                     logger.warning("LLM evidence call failed: %s", exc)
 
-        # ── Step 3: write results to DB one at a time so a lock on one record
+        # â”€â”€ Step 3: write results to DB one at a time so a lock on one record
         #           doesn't discard the entire batch.
         count = 0
         for res in results:
@@ -420,3 +498,4 @@ class ComplianceEngine:
             )
         prompt = build_batch_summary_prompt(violations)
         return self.llm.analyze(system=SYSTEM_PROMPT, user=prompt, max_tokens=400)
+

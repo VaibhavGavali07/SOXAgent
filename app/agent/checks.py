@@ -7,6 +7,7 @@ and returns a (possibly empty) list of ViolationResult objects to be persisted.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from typing import Any
 
 
@@ -40,6 +41,12 @@ def _enabled(cfg: Any, control_key: str) -> bool:
     return bool(data.get("enabled", True))
 
 
+def _cfg_value(cfg: Any, key: str, default: Any = None) -> Any:
+    if isinstance(cfg, dict):
+        return cfg.get(key, default)
+    return getattr(cfg, key, default)
+
+
 _APPROVAL_KEYWORDS = (
     "approve",
     "approved",
@@ -47,16 +54,6 @@ _APPROVAL_KEYWORDS = (
     "authorized",
     "authorised",
     "go ahead",
-)
-
-_IMPLEMENTATION_KEYWORDS = (
-    "implemented",
-    "implementation",
-    "deployed",
-    "applied",
-    "fixed",
-    "resolved",
-    "completed",
 )
 
 _DOCUMENTATION_KEYWORDS = (
@@ -68,6 +65,84 @@ _DOCUMENTATION_KEYWORDS = (
     "validation",
     "closure note",
     "change record",
+    "screenshot",
+    "screen shot",
+    "attaced",
+)
+
+_RESOLUTION_NOTE_KEYWORDS = (
+    "resolution",
+    "resolved",
+    "fix",
+    "fixed",
+    "root cause",
+    "closure note",
+    "close note",
+)
+
+_CLOSER_COMMENT_KEYWORDS = (
+    "approval provided",
+    "approved",
+    "access provided",
+    "access granted",
+    "provisioned",
+    "implemented",
+    "resolved",
+    "completed",
+    "closed",
+    "granted",
+)
+
+_CLOSURE_SUCCESS_KEYWORDS = (
+    "success",
+    "successfully",
+    "completed",
+    "resolved",
+    "implemented",
+    "fixed",
+    "access provided",
+    "access granted",
+    "granted",
+)
+
+_CLOSURE_ISSUE_KEYWORDS = (
+    "issue",
+    "failed",
+    "failure",
+    "error",
+    "blocked",
+    "pending",
+    "rollback",
+    "reopened",
+    "exception",
+)
+
+_DUPLICATE_EXPLANATION_KEYWORDS = (
+    "duplicate",
+    "already exists",
+    "existing ticket",
+    "same issue",
+    "linked ticket",
+    "merged with",
+    "see inc",
+    "see req",
+    "refer to",
+)
+
+_SOFTWARE_CONTEXT_KEYWORDS = (
+    "install",
+    "installed",
+    "installation",
+    "software",
+    "tool",
+    "application",
+    "app",
+    "package",
+    "access",
+    "provide access",
+    "grant access",
+    "use",
+    "deploy",
 )
 
 
@@ -76,7 +151,7 @@ def _norm(value: Any) -> str:
 
 
 def _normalize_comments(ticket: dict[str, Any]) -> list[dict[str, str]]:
-    """Normalize comments into [{'author': str, 'text': str}] across source formats."""
+    """Normalize comments into [{'author': str, 'text': str, 'created_at': str}] across source formats."""
     raw_comments = ticket.get("comments")
     candidates: list[Any] = []
 
@@ -101,6 +176,7 @@ def _normalize_comments(ticket: dict[str, Any]) -> list[dict[str, str]]:
     seen: set[tuple[str, str]] = set()
 
     for entry in candidates:
+        created_at = ""
         if isinstance(entry, dict):
             author = _norm(
                 entry.get("author")
@@ -121,6 +197,14 @@ def _normalize_comments(ticket: dict[str, Any]) -> list[dict[str, str]]:
                 or entry.get("note")
                 or ""
             )
+            created_at = _norm(
+                entry.get("created_at")
+                or entry.get("created")
+                or entry.get("timestamp")
+                or entry.get("sys_created_on")
+                or entry.get("time")
+                or ""
+            )
         else:
             author = "unknown"
             text = _norm(entry)
@@ -132,7 +216,7 @@ def _normalize_comments(ticket: dict[str, Any]) -> list[dict[str, str]]:
         if key in seen:
             continue
         seen.add(key)
-        normalized.append({"author": author, "text": text})
+        normalized.append({"author": author, "text": text, "created_at": created_at})
 
     return normalized
 
@@ -163,6 +247,154 @@ def _has_comment(
     return False
 
 
+def _llm_comment_result(
+    ticket: dict[str, Any],
+    config: Any,
+    comments: list[dict[str, str]],
+) -> dict[str, Any]:
+    cache_key = "_llm_rule_eval"
+    if cache_key in ticket:
+        return ticket.get(cache_key) or {}
+
+    evaluator = _cfg_value(config, "COMMENT_RULE_EVALUATOR")
+    if evaluator is None or not hasattr(evaluator, "evaluate"):
+        ticket[cache_key] = {}
+        return {}
+
+    try:
+        result = evaluator.evaluate(ticket=ticket, comments=comments)
+        ticket[cache_key] = result if isinstance(result, dict) else {}
+        return ticket[cache_key]
+    except Exception:
+        ticket[cache_key] = {}
+        return {}
+
+
+def _canon_user(value: Any) -> str:
+    user = _norm(value).lower()
+    if not user:
+        return ""
+    if "@" in user:
+        user = user.split("@", 1)[0]
+    return "".join(ch for ch in user if ch.isalnum())
+
+
+def _author_matches(author: str, expected_user: str) -> bool:
+    a = _canon_user(author)
+    e = _canon_user(expected_user)
+    if not a or not e:
+        return False
+    return a == e or e in a or a in e
+
+
+def _find_comments(
+    comments: list[dict[str, str]],
+    *,
+    author: str | None = None,
+    keywords: tuple[str, ...] | None = None,
+) -> list[dict[str, str]]:
+    matched: list[dict[str, str]] = []
+    for comment in comments:
+        c_author = _norm(comment.get("author"))
+        c_text = _norm(comment.get("text"))
+        if author and not _author_matches(c_author, author):
+            continue
+        if keywords and not _contains_keyword(c_text, keywords):
+            continue
+        matched.append(comment)
+    return matched
+
+
+def _all_ticket_text(ticket: dict[str, Any], comments: list[dict[str, str]]) -> str:
+    chunks = [
+        _norm(ticket.get("title")),
+        _norm(ticket.get("description")),
+        _norm(ticket.get("summary")),
+    ]
+    chunks.extend(_norm(c.get("text")) for c in comments)
+    return "\n".join(x for x in chunks if x)
+
+
+def _extract_software_candidates(text: str) -> set[str]:
+    candidates: set[str] = set()
+    # Explicit forms like "software: xyz", "tool - abc", "install xyz".
+    patterns = [
+        r"(?:software|tool|application|app|package)\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9 ._+\-/]{1,60}?)(?=\s(?:for|to|by|on|in|with|from|user|requestor|requester|employee|account|id|role|group|permission|permissions|access|license|licence|environment|env)\b|[.,;:()\[\]{}]|$)",
+        r"(?:install|use|deploy|grant access to|provide access to)\s+([A-Za-z0-9][A-Za-z0-9 ._+\-/]{1,60}?)(?=\s(?:for|to|by|on|in|with|from|user|requestor|requester|employee|account|id|role|group|permission|permissions|access|license|licence|environment|env)\b|[.,;:()\[\]{}]|$)",
+    ]
+    for pat in patterns:
+        for m in re.finditer(pat, text, flags=re.IGNORECASE):
+            raw = _norm(m.group(1)).strip(" .,:;()[]{}")
+            if raw:
+                candidates.add(raw)
+    return candidates
+
+
+def _is_approved_software(candidate: str, approved_lower: set[str]) -> bool:
+    c = candidate.lower()
+    if not c:
+        return True
+    if c in approved_lower:
+        return True
+    # Allow close matches for version/tag differences.
+    if any(c in approved or approved in c for approved in approved_lower):
+        return True
+
+    def _core_tokens(name: str) -> set[str]:
+        generic = {
+            "software",
+            "tool",
+            "tools",
+            "application",
+            "app",
+            "package",
+            "client",
+            "desktop",
+            "agent",
+            "suite",
+            "platform",
+            "system",
+            "access",
+        }
+        tokens = re.findall(r"[a-z0-9]+", name.lower())
+        return {t for t in tokens if t and t not in generic}
+
+    cand_tokens = _core_tokens(c)
+    if not cand_tokens:
+        return True
+
+    for approved in approved_lower:
+        app_tokens = _core_tokens(approved)
+        if not app_tokens:
+            continue
+        if cand_tokens == app_tokens:
+            return True
+        if cand_tokens.issubset(app_tokens) or app_tokens.issubset(cand_tokens):
+            return True
+
+        # Single-keyword alias match: e.g., "jira tool" vs "jira software".
+        if len(cand_tokens) == 1:
+            tok = next(iter(cand_tokens))
+            if len(tok) >= 4 and tok in app_tokens:
+                return True
+
+    return False
+
+
+def _parse_dt(raw: Any):
+    if not raw:
+        return None
+    try:
+        from datetime import datetime
+
+        s = str(raw).strip().replace("Z", "+00:00")
+        if " " in s and "T" not in s:
+            s = s.replace(" ", "T")
+        return datetime.fromisoformat(s)
+    except (ValueError, TypeError):
+        return None
+
+
 def check_access_provisioning(ticket: dict[str, Any], config: Any) -> list[ViolationResult]:
     """ITGC-AC-01 / ITGC-AC-02 / ITGC-AC-03."""
     controls = _controls(config)
@@ -173,7 +405,7 @@ def check_access_provisioning(ticket: dict[str, Any], config: Any) -> list[Viola
     approver = ticket.get("approver_id", "")
     tags = [t.lower() for t in (ticket.get("tags") or [])]
 
-    if _enabled(config, "SELF_APPROVAL") and requestor and approver and requestor == approver:
+    if _enabled(config, "SELF_APPROVAL") and requestor and approver and _author_matches(approver, requestor):
         results.append(
             ViolationResult(
                 violation_type="SELF_APPROVAL",
@@ -220,7 +452,7 @@ def check_access_provisioning(ticket: dict[str, Any], config: Any) -> list[Viola
 
 
 def check_workflow_documentation(ticket: dict[str, Any], config: Any) -> list[ViolationResult]:
-    """ITGC-WF-01: Closed tickets must have documentation_link or documentation comments."""
+    """ITGC-WF-01: Closed tickets need closure documentation and outcome comment trail."""
     controls = _controls(config)
     results: list[ViolationResult] = []
     if not _enabled(config, "MISSING_DOCUMENTATION"):
@@ -231,8 +463,64 @@ def check_workflow_documentation(ticket: dict[str, Any], config: Any) -> list[Vi
         return results
 
     comments = _normalize_comments(ticket)
+    llm_eval = _llm_comment_result(ticket, config, comments)
     has_doc_link = bool(_norm(ticket.get("documentation_link")))
     has_doc_comment = _has_comment(comments, keywords=_DOCUMENTATION_KEYWORDS)
+    raw_snow = ticket.get("_raw_snow") or {}
+    # Primary requirement from ServiceNow: dedicated resolution note field.
+    resolution_note = (
+        _norm(ticket.get("resolution_note"))
+        or _norm(raw_snow.get("resolution_note"))
+        or _norm(raw_snow.get("resolution_notes"))
+        or _norm(raw_snow.get("u_resolution_note"))
+    )
+    has_resolution_note = bool(resolution_note)
+
+    closer = _norm(ticket.get("closed_by") or ticket.get("resolved_by") or ticket.get("implementer_id"))
+    closer_comments = (
+        _find_comments(comments, author=closer, keywords=_CLOSER_COMMENT_KEYWORDS)
+        if closer
+        else _find_comments(comments, keywords=_CLOSER_COMMENT_KEYWORDS)
+    )
+    has_closer_comment = bool(closer_comments)
+    closer_outcome_comments = (
+        _find_comments(
+            comments,
+            author=closer if closer else None,
+            keywords=_CLOSURE_SUCCESS_KEYWORDS + _CLOSURE_ISSUE_KEYWORDS,
+        )
+    )
+    has_closer_outcome_comment = bool(closer_outcome_comments)
+    has_success_outcome = any(_contains_keyword(_norm(c.get("text")), _CLOSURE_SUCCESS_KEYWORDS) for c in closer_outcome_comments)
+    has_issue_outcome = any(_contains_keyword(_norm(c.get("text")), _CLOSURE_ISSUE_KEYWORDS) for c in closer_outcome_comments)
+
+    duplicate_markers = " ".join(
+        [
+            _norm(ticket.get("title")).lower(),
+            _norm(ticket.get("description")).lower(),
+            _norm(ticket.get("close_code")).lower(),
+            _norm(raw_snow.get("close_code")).lower(),
+            _norm(raw_snow.get("close_notes")).lower(),
+            _norm(raw_snow.get("close_reason")).lower(),
+        ]
+    )
+    is_duplicate_issue = "duplicate" in duplicate_markers
+    duplicate_expl_comments = (
+        _find_comments(comments, author=closer, keywords=_DUPLICATE_EXPLANATION_KEYWORDS)
+        if closer
+        else _find_comments(comments, keywords=_DUPLICATE_EXPLANATION_KEYWORDS)
+    )
+    has_duplicate_explanation = bool(duplicate_expl_comments)
+
+    # LLM semantic overrides for writing style variability.
+    has_doc_comment = has_doc_comment or bool(llm_eval.get("has_documentation_evidence"))
+    has_resolution_note = has_resolution_note or bool(llm_eval.get("has_resolution_note_or_equivalent"))
+    has_closer_comment = has_closer_comment or bool(llm_eval.get("has_closer_comment"))
+    has_closer_outcome_comment = has_closer_outcome_comment or bool(llm_eval.get("has_closure_outcome_comment"))
+    has_duplicate_explanation = has_duplicate_explanation or bool(llm_eval.get("has_duplicate_explanation"))
+    closure_outcome = str(llm_eval.get("closure_outcome") or "").strip().lower()
+    has_success_outcome = has_success_outcome or closure_outcome == "success"
+    has_issue_outcome = has_issue_outcome or closure_outcome == "issue"
 
     if not has_doc_link and not has_doc_comment:
         results.append(
@@ -245,6 +533,86 @@ def check_workflow_documentation(ticket: dict[str, Any], config: Any) -> list[Vi
                     "documentation link and no documentation/evidence comment trail."
                 ),
                 metadata={"status": ticket.get("status"), "comments_count": len(comments)},
+            )
+        )
+    if not has_closer_outcome_comment:
+        results.append(
+            ViolationResult(
+                violation_type="MISSING_CLOSURE_OUTCOME_COMMENT",
+                control_id=controls["MISSING_DOCUMENTATION"]["id"],
+                severity=controls["MISSING_DOCUMENTATION"]["severity"],
+                description=(
+                    f"Ticket '{ticket.get('ticket_key')}' is {ticket.get('status')} but has no closure outcome "
+                    + (f"comment from closer '{closer}'" if closer else "comment in trail")
+                    + " indicating whether the incident was completed successfully or closed with an issue."
+                ),
+                metadata={"status": ticket.get("status"), "closer_id": closer or None, "comments_count": len(comments)},
+            )
+        )
+    if has_success_outcome and not has_doc_link and not has_doc_comment and not has_resolution_note:
+        results.append(
+            ViolationResult(
+                violation_type="MISSING_SUCCESS_CLOSURE_EVIDENCE",
+                control_id=controls["MISSING_DOCUMENTATION"]["id"],
+                severity=controls["MISSING_DOCUMENTATION"]["severity"],
+                description=(
+                    f"Ticket '{ticket.get('ticket_key')}' has a successful closure comment but lacks "
+                    "resolution note/documented evidence."
+                ),
+                metadata={"status": ticket.get("status"), "closer_id": closer or None},
+            )
+        )
+    if has_issue_outcome and not has_resolution_note and not has_duplicate_explanation:
+        results.append(
+            ViolationResult(
+                violation_type="MISSING_ISSUE_CLOSURE_EXPLANATION",
+                control_id=controls["MISSING_DOCUMENTATION"]["id"],
+                severity=controls["MISSING_DOCUMENTATION"]["severity"],
+                description=(
+                    f"Ticket '{ticket.get('ticket_key')}' indicates issue-based closure, but no resolution note "
+                    "or issue explanation comment was found."
+                ),
+                metadata={"status": ticket.get("status"), "closer_id": closer or None},
+            )
+        )
+    if not has_resolution_note:
+        results.append(
+            ViolationResult(
+                violation_type="MISSING_RESOLUTION_NOTE",
+                control_id=controls["MISSING_DOCUMENTATION"]["id"],
+                severity=controls["MISSING_DOCUMENTATION"]["severity"],
+                description=(
+                    f"Ticket '{ticket.get('ticket_key')}' is {ticket.get('status')} but ServiceNow "
+                    "resolution note field is empty."
+                ),
+                metadata={"status": ticket.get("status"), "comments_count": len(comments)},
+            )
+        )
+    if not has_resolution_note and not has_closer_comment:
+        results.append(
+            ViolationResult(
+                violation_type="MISSING_CLOSER_COMMENT",
+                control_id=controls["MISSING_DOCUMENTATION"]["id"],
+                severity=controls["MISSING_DOCUMENTATION"]["severity"],
+                description=(
+                    f"Ticket '{ticket.get('ticket_key')}' is {ticket.get('status')} but has no closer comment "
+                    + (f"from closer '{closer}'" if closer else "in comments")
+                    + " (e.g., 'approval provided' / 'access provided')."
+                ),
+                metadata={"status": ticket.get("status"), "closer_id": closer or None, "comments_count": len(comments)},
+            )
+        )
+    if is_duplicate_issue and not has_duplicate_explanation:
+        results.append(
+            ViolationResult(
+                violation_type="MISSING_DUPLICATE_EXPLANATION_COMMENT",
+                control_id=controls["MISSING_DOCUMENTATION"]["id"],
+                severity=controls["MISSING_DOCUMENTATION"]["severity"],
+                description=(
+                    f"Ticket '{ticket.get('ticket_key')}' appears marked as duplicate, but no explanatory "
+                    "duplicate/linked-ticket closure comment was found."
+                ),
+                metadata={"status": ticket.get("status"), "closer_id": closer or None, "comments_count": len(comments)},
             )
         )
 
@@ -292,14 +660,14 @@ def check_sod(ticket: dict[str, Any], config: Any) -> list[ViolationResult]:
 def check_software(ticket: dict[str, Any], config: Any) -> list[ViolationResult]:
     """ITGC-SW-01: flag software not on the approved software list."""
     controls = _controls(config)
-    approved_lower = {s.lower() for s in _software(config)}
+    approved_lower = {str(s).strip().lower() for s in _software(config) if str(s).strip()}
     results: list[ViolationResult] = []
     if not _enabled(config, "UNAUTHORIZED_SOFTWARE"):
         return results
 
     for entry in (ticket.get("installation_log") or []):
         sw = entry.get("software", "")
-        if sw.lower() not in approved_lower:
+        if not _is_approved_software(sw, approved_lower):
             results.append(
                 ViolationResult(
                     violation_type="UNAUTHORIZED_SOFTWARE",
@@ -311,6 +679,25 @@ def check_software(ticket: dict[str, Any], config: Any) -> list[ViolationResult]
                         "This application is not present on the Approved Software List."
                     ),
                     metadata={"software": sw, "version": entry.get("version"), "user": entry.get("user")},
+                )
+            )
+
+    comments = _normalize_comments(ticket)
+    corpus = _all_ticket_text(ticket, comments)
+    if _contains_keyword(corpus, _SOFTWARE_CONTEXT_KEYWORDS):
+        for sw in sorted(_extract_software_candidates(corpus)):
+            if _is_approved_software(sw, approved_lower):
+                continue
+            results.append(
+                ViolationResult(
+                    violation_type="UNAUTHORIZED_SOFTWARE_REQUEST",
+                    control_id=controls["UNAUTHORIZED_SOFTWARE"]["id"],
+                    severity=controls["UNAUTHORIZED_SOFTWARE"]["severity"],
+                    description=(
+                        f"Ticket '{ticket.get('ticket_key')}' requests or references unauthorized software/tool "
+                        f"'{sw}' in description/comments."
+                    ),
+                    metadata={"software": sw},
                 )
             )
 
@@ -326,12 +713,27 @@ def check_missing_approval(ticket: dict[str, Any], config: Any) -> list[Violatio
     approver = _norm(ticket.get("approver_id"))
     requestor = _norm(ticket.get("requestor_id"))
     comments = _normalize_comments(ticket)
+    llm_eval = _llm_comment_result(ticket, config, comments)
 
     if is_closed:
-        has_approval_comment_any = _has_comment(comments, keywords=_APPROVAL_KEYWORDS)
-        has_approval_comment_by_approver = bool(approver) and _has_comment(
-            comments, author=approver, keywords=_APPROVAL_KEYWORDS
-        )
+        approval_comments_any = _find_comments(comments, keywords=_APPROVAL_KEYWORDS)
+        approval_comments_by_approver = _find_comments(comments, author=approver, keywords=_APPROVAL_KEYWORDS) if approver else []
+        approval_comments_by_requestor = _find_comments(comments, author=requestor, keywords=_APPROVAL_KEYWORDS) if requestor else []
+        approval_comments_evidence = [
+            c for c in approval_comments_any
+            if _contains_keyword(
+                _norm(c.get("text")),
+                ("manager", "mgr", "lead", "approved by", "approval from", "screenshot", "mail", "email"),
+            )
+        ]
+
+        has_approval_comment_any = bool(approval_comments_any)
+        has_approval_comment_by_approver = bool(approval_comments_by_approver)
+        has_approval_evidence_comment = bool(approval_comments_evidence)
+
+        # LLM semantic overrides for approval interpretation.
+        has_approval_comment_any = has_approval_comment_any or bool(llm_eval.get("has_approval_comment"))
+        has_approval_evidence_comment = has_approval_evidence_comment or bool(llm_eval.get("has_approval_evidence"))
 
         if _enabled(config, "MISSING_APPROVAL") and not approver and not has_approval_comment_any:
             results.append(
@@ -347,7 +749,12 @@ def check_missing_approval(ticket: dict[str, Any], config: Any) -> list[Violatio
                 )
             )
 
-        if _enabled(config, "MISSING_APPROVAL") and approver and not has_approval_comment_by_approver:
+        if (
+            _enabled(config, "MISSING_APPROVAL")
+            and approver
+            and not has_approval_comment_by_approver
+            and not has_approval_evidence_comment
+        ):
             results.append(
                 ViolationResult(
                     violation_type="MISSING_APPROVAL_COMMENT",
@@ -361,7 +768,20 @@ def check_missing_approval(ticket: dict[str, Any], config: Any) -> list[Violatio
                 )
             )
 
-        if _enabled(config, "SELF_APPROVAL") and requestor and _has_comment(comments, author=requestor, keywords=_APPROVAL_KEYWORDS):
+        explicit_self_approval = bool(
+            requestor and _has_comment(
+                comments,
+                author=requestor,
+                keywords=("i approve", "approved by me", "my approval", "self-approve", "self approve"),
+            )
+        )
+        if (
+            _enabled(config, "SELF_APPROVAL")
+            and requestor
+            and approver
+            and _author_matches(approver, requestor)
+            and (approval_comments_by_requestor or explicit_self_approval)
+        ):
             results.append(
                 ViolationResult(
                     violation_type="SELF_APPROVAL_COMMENT",
@@ -369,9 +789,32 @@ def check_missing_approval(ticket: dict[str, Any], config: Any) -> list[Violatio
                     severity=controls["SELF_APPROVAL"]["severity"],
                     description=(
                         f"Potential self-approval by comment trail: requestor '{requestor}' added "
-                        "an approval-like comment."
+                        "approval-like comment(s). Approval must be recorded by a different approver."
                     ),
-                    metadata={"requestor_id": requestor},
+                    metadata={"requestor_id": requestor, "approver_id": approver or None},
+                )
+            )
+
+        closed_ts = _parse_dt(ticket.get("closed_at"))
+        if (
+            _enabled(config, "MISSING_APPROVAL")
+            and closed_ts
+            and has_approval_comment_by_approver
+            and all(
+                (dt is None) or (dt > closed_ts)
+                for dt in (_parse_dt(c.get("created_at")) for c in approval_comments_by_approver)
+            )
+        ):
+            results.append(
+                ViolationResult(
+                    violation_type="LATE_APPROVAL_COMMENT",
+                    control_id=controls["MISSING_APPROVAL"]["id"],
+                    severity=controls["MISSING_APPROVAL"]["severity"],
+                    description=(
+                        f"Ticket '{ticket.get('ticket_key')}' has approval comment(s) from approver '{approver}', "
+                        "but all of them were added after closure/resolution."
+                    ),
+                    metadata={"approver_id": approver, "closed_at": ticket.get("closed_at")},
                 )
             )
 
@@ -398,50 +841,6 @@ def check_missing_approval(ticket: dict[str, Any], config: Any) -> list[Violatio
                 )
         except (ValueError, TypeError):
             pass
-
-    return results
-
-
-def check_missing_implementer(ticket: dict[str, Any], config: Any) -> list[ViolationResult]:
-    """ITGC-WF-02: implementer identity + implementation comment trail."""
-    controls = _controls(config)
-    results: list[ViolationResult] = []
-    if not _enabled(config, "MISSING_IMPLEMENTER"):
-        return results
-
-    is_closed = ticket.get("status", "").lower() in ("closed", "resolved")
-    implementer = _norm(ticket.get("implementer_id"))
-    comments = _normalize_comments(ticket)
-
-    if is_closed and not implementer:
-        results.append(
-            ViolationResult(
-                violation_type="MISSING_IMPLEMENTER",
-                control_id=controls["MISSING_IMPLEMENTER"]["id"],
-                severity=controls["MISSING_IMPLEMENTER"]["severity"],
-                description=(
-                    f"Ticket '{ticket.get('ticket_key')}' is {ticket.get('status')} but has no "
-                    "implementer assigned."
-                ),
-                metadata={"status": ticket.get("status"), "implementer_id": None},
-            )
-        )
-
-    if is_closed and implementer and not _has_comment(
-        comments, author=implementer, keywords=_IMPLEMENTATION_KEYWORDS
-    ):
-        results.append(
-            ViolationResult(
-                violation_type="MISSING_IMPLEMENTER_COMMENT",
-                control_id=controls["MISSING_IMPLEMENTER"]["id"],
-                severity=controls["MISSING_IMPLEMENTER"]["severity"],
-                description=(
-                    f"Ticket '{ticket.get('ticket_key')}' has implementer '{implementer}', but no "
-                    "implementation/closure comment from that implementer was found."
-                ),
-                metadata={"implementer_id": implementer, "comments_count": len(comments)},
-            )
-        )
 
     return results
 
@@ -520,14 +919,100 @@ def run_custom_rules(ticket: dict, rules: list) -> list[ViolationResult]:
 
 
 def run_all_checks(ticket: dict, config: Any) -> list[ViolationResult]:
-    """Run all compliance checks against a single ticket."""
+    """Run enabled controls using LLM as the primary compliance decision engine."""
+    controls = _controls(config)
+    evaluator = _cfg_value(config, "TICKET_RULE_EVALUATOR") or _cfg_value(config, "COMMENT_RULE_EVALUATOR")
+    approved_software = [str(x).strip() for x in (_software(config) or []) if str(x).strip()]
+    authorized_approvers = [str(x).strip() for x in (_approvers(config) or []) if str(x).strip()]
+    enabled_controls: list[dict[str, str]] = []
+    for control_key, data in controls.items():
+        if not _enabled(config, control_key):
+            continue
+        enabled_controls.append(
+            {
+                "control_key": control_key,
+                "control_id": str(data.get("id") or control_key),
+                "name": str(data.get("name") or control_key.replace("_", " ").title()),
+                "severity": str(data.get("severity") or "Medium"),
+                "description": str(data.get("description") or ""),
+            }
+        )
+
+    comments = _normalize_comments(ticket)
+    eval_result: dict[str, Any] = {}
+    if evaluator and hasattr(evaluator, "assess_ticket_rules"):
+        try:
+            eval_result = evaluator.assess_ticket_rules(
+                ticket=ticket,
+                comments=comments,
+                controls=enabled_controls,
+                approved_software=approved_software,
+                authorized_approvers=authorized_approvers,
+            ) or {}
+        except Exception:
+            eval_result = {}
+
+    checks = eval_result.get("checks") if isinstance(eval_result, dict) else None
+    if not isinstance(checks, list):
+        checks = []
+    if not checks and enabled_controls:
+        checks = [
+            {
+                "control_key": c["control_key"],
+                "control_id": c["control_id"],
+                "control_name": c["name"],
+                "severity": c["severity"],
+                "applicable": True,
+                "passed": False,
+                "reason": "LLM evaluation unavailable or invalid response.",
+                "evidence": [],
+            }
+            for c in enabled_controls
+        ]
+
+    # Persist full check payload on the ticket object for DB persistence in compliance_engine.
+    ticket["_llm_rule_assessment"] = {
+        "control_domain": str(eval_result.get("control_domain") or "").strip() if isinstance(eval_result, dict) else "",
+        "entities": eval_result.get("entities") if isinstance(eval_result, dict) and isinstance(eval_result.get("entities"), dict) else {},
+        "final_status": str(eval_result.get("final_status") or "").strip() if isinstance(eval_result, dict) else "",
+        "summary": str(eval_result.get("summary") or "").strip() if isinstance(eval_result, dict) else "",
+        "missing_evidence": eval_result.get("missing_evidence") if isinstance(eval_result, dict) and isinstance(eval_result.get("missing_evidence"), list) else [],
+        "checks": checks,
+    }
+
     violations: list[ViolationResult] = []
-    # Primary focus controls (requested order)
-    violations.extend(check_access_provisioning(ticket, config))   # ITGC-AC-01 (others gated by enable flags)
-    violations.extend(check_workflow_documentation(ticket, config))
-    violations.extend(check_software(ticket, config))
-    violations.extend(check_missing_approval(ticket, config))       # ITGC-AC-04 (AC-05 gated by enable flag)
-    violations.extend(check_missing_implementer(ticket, config))
-    # Secondary controls (kept visible, executed only if enabled)
-    violations.extend(check_sod(ticket, config))
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        applicable = bool(check.get("applicable", True))
+        passed = bool(check.get("passed", False))
+        if not applicable or passed:
+            continue
+
+        control_id = str(check.get("control_id") or "").strip()
+        control_key = str(check.get("control_key") or "").strip()
+        severity = str(check.get("severity") or "Medium").strip() or "Medium"
+        reason = str(check.get("reason") or "").strip() or "Control failed per LLM assessment."
+        evidence = check.get("evidence")
+        if not isinstance(evidence, list):
+            evidence = []
+        evidence = [str(x).strip() for x in evidence if str(x).strip()]
+
+        violations.append(
+            ViolationResult(
+                violation_type=f"{control_key}_FAILED" if control_key else "CONTROL_FAILED",
+                control_id=control_id or "ITGC-UNKNOWN",
+                severity=severity,
+                description=(
+                    f"LLM rule assessment failed for ticket '{ticket.get('ticket_key', 'N/A')}' "
+                    f"on control '{control_id or control_key}'. Reason: {reason}"
+                ),
+                metadata={
+                    "control_key": control_key or None,
+                    "reason": reason,
+                    "evidence": evidence,
+                    "llm_based": True,
+                },
+            )
+        )
     return violations

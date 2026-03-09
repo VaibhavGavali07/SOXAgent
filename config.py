@@ -19,7 +19,7 @@ class Config:
         "connect_args": {"timeout": 30, "check_same_thread": False},
     }
 
-    # ── ITGC Control Definitions ────────────────────────────────────────────
+    # -- ITGC Control Definitions --------------------------------------------
     CONTROLS: dict[str, dict] = {
         "SELF_APPROVAL": {
             "id": "ITGC-AC-01",
@@ -72,7 +72,7 @@ class Config:
             "description": "Software absent from the Approved Software List was detected.",
             "framework": "SOX §404 / CIS Control 2",
         },
-        # ── Task 1 gaps ───────────────────────────────────────────────────────
+        # -- Task 1 gaps -------------------------------------------------------
         "MISSING_APPROVAL": {
             "id": "ITGC-AC-04",
             "name": "Missing Approval",
@@ -89,18 +89,9 @@ class Config:
             "description": "Approval timestamp is absent or occurred after ticket closure.",
             "framework": "SOX §302 / NIST AU-3",
         },
-        # ── Task 2 gap ────────────────────────────────────────────────────────
-        "MISSING_IMPLEMENTER": {
-            "id": "ITGC-WF-02",
-            "name": "Missing Implementer Assignment",
-            "severity": "Medium",
-            "enabled": True,
-            "description": "Closed/resolved ticket has no implementer assigned – mandatory workflow step was skipped.",
-            "framework": "SOX §404 / COBIT BAI06.01",
-        },
     }
 
-    # ── Authorized Approvers (Owners List) ───────────────────────────────────
+    # -- Authorized Approvers (Owners List) -----------------------------------
     AUTHORIZED_APPROVERS: list[str] = [
         "mgr_001",
         "mgr_002",
@@ -113,7 +104,7 @@ class Config:
         "admin_lead_01",
     ]
 
-    # ── Approved Software List ────────────────────────────────────────────────
+    # -- Approved Software List ------------------------------------------------
     APPROVED_SOFTWARE: list[str] = [
         "Microsoft Office 365",
         "Zoom",
@@ -139,3 +130,4 @@ class Config:
         "Adobe Acrobat Reader",
         "Notepad++",
     ]
+
