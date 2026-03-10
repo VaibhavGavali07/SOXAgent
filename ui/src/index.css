@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #0f172a;
+  background: #edf2f7;
+}
+
+body {
+  min-height: 100vh;
+  background: #edf2f7;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.25) transparent;
+}
+
+.panel {
+  @apply rounded-2xl border border-slate-200 bg-white shadow-sm;
+}
+
+.label {
+  @apply text-xs font-semibold uppercase tracking-[0.24em] text-slate-500;
+}
+
+.input {
+  @apply w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-200;
+}
+
+.button-primary {
+  @apply rounded-lg bg-[#2b53d0] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#2246b4];
+}
+
+.button-secondary {
+  @apply rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900;
+}
+
+.skeleton {
+  @apply animate-pulse rounded-2xl bg-slate-200/80;
+}

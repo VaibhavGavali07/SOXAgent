@@ -1,0 +1,79 @@
+[
+  {
+    "number": "INC0019001",
+    "record_type": "incident",
+    "short_description": "Restore access to privileged dashboard",
+    "description": "User lost access to privileged dashboard and requested admin role restoration.",
+    "state": "Closed",
+    "requested_for": {"id": "u103", "name": "Priya Nair", "email": "priya.nair@example.com"},
+    "approval_history": [
+      {
+        "approver": {"id": "u210", "name": "Ken Auditor", "email": "ken.auditor@example.com"},
+        "timestamp": "2026-03-04T09:05:00Z",
+        "type": "security",
+        "decision": "approved"
+      }
+    ],
+    "assigned_implementers": [
+      {"id": "u103", "name": "Priya Nair", "email": "priya.nair@example.com"}
+    ],
+    "opened_at": "2026-03-04T08:10:00Z",
+    "sys_updated_on": "2026-03-04T13:20:00Z",
+    "closed_at": "2026-03-04T13:20:00Z",
+    "workflow_steps": [
+      {"name": "onboarding_complete", "status": "done", "timestamp": "2026-03-04T12:10:00Z"}
+    ],
+    "state_transitions": [
+      {"from": "New", "to": "Assess", "by": {"id": "u210", "name": "Ken Auditor"}, "timestamp": "2026-03-04T09:05:00Z"},
+      {"from": "Assess", "to": "Resolved", "by": {"id": "u103", "name": "Priya Nair"}, "timestamp": "2026-03-04T12:30:00Z"},
+      {"from": "Resolved", "to": "Closed", "by": {"id": "u103", "name": "Priya Nair"}, "timestamp": "2026-03-04T13:20:00Z"}
+    ],
+    "activity": [
+      {"id": "snc1", "author": {"id": "u103", "name": "Priya Nair"}, "timestamp": "2026-03-04T12:35:00Z", "body": "I restored my own admin role to validate the issue is fixed."},
+      {"id": "snc2", "author": {"id": "u210", "name": "Ken Auditor"}, "timestamp": "2026-03-04T12:40:00Z", "body": "Need second approval if admin remains active."}
+    ],
+    "attachments": [
+      {"id": "a10", "name": "validation.txt", "url": "https://example.local/validation.txt"}
+    ],
+    "custom_fields": {"risk_hint": "HIGH", "category": "identity"}
+  },
+  {
+    "number": "CHG0019002",
+    "record_type": "change",
+    "short_description": "Emergency patch to payroll integration",
+    "description": "Emergency deployment to restore payroll file transfer during quarter-end processing.",
+    "state": "Closed",
+    "requested_for": {"id": "u104", "name": "Oliver Grant", "email": "oliver.grant@example.com"},
+    "approval_history": [
+      {
+        "approver": {"id": "u211", "name": "Dana Risk", "email": "dana.risk@example.com"},
+        "timestamp": "2026-03-05T10:10:00Z",
+        "type": "manager",
+        "decision": "approved"
+      }
+    ],
+    "assigned_implementers": [
+      {"id": "u303", "name": "Rita Change", "email": "rita.change@example.com"}
+    ],
+    "opened_at": "2026-03-05T09:30:00Z",
+    "sys_updated_on": "2026-03-05T17:30:00Z",
+    "closed_at": "2026-03-05T17:30:00Z",
+    "workflow_steps": [
+      {"name": "onboarding_complete", "status": "done", "timestamp": "2026-03-05T16:40:00Z"}
+    ],
+    "state_transitions": [
+      {"from": "New", "to": "Scheduled", "by": {"id": "u211", "name": "Dana Risk"}, "timestamp": "2026-03-05T10:10:00Z"},
+      {"from": "Scheduled", "to": "Implement", "by": {"id": "u303", "name": "Rita Change"}, "timestamp": "2026-03-05T11:00:00Z"},
+      {"from": "Implement", "to": "Closed", "by": {"id": "u303", "name": "Rita Change"}, "timestamp": "2026-03-05T17:30:00Z"}
+    ],
+    "activity": [
+      {"id": "snc10", "author": {"id": "u303", "name": "Rita Change"}, "timestamp": "2026-03-05T11:05:00Z", "body": "Patch deployed after manager approval. Evidence attached."},
+      {"id": "snc11", "author": {"id": "u303", "name": "Rita Change"}, "timestamp": "2026-03-05T17:20:00Z", "body": "Validation evidence attached and handoff complete."}
+    ],
+    "attachments": [
+      {"id": "a20", "name": "deployment-evidence.pdf", "url": "https://example.local/deployment-evidence.pdf"}
+    ],
+    "custom_fields": {"risk_hint": "MEDIUM", "category": "change"}
+  }
+]
+

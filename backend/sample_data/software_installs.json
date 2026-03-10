@@ -1,0 +1,24 @@
+[
+  {
+    "ticket_id": "JIRA-1001",
+    "software_name": "Spreadsheet SuperExporter",
+    "installed_by": {"id": "u300", "name": "Leo Admin", "email": "leo.admin@example.com"},
+    "authorized": false,
+    "timestamp": "2026-03-01T10:18:00Z"
+  },
+  {
+    "ticket_id": "JIRA-1003",
+    "software_name": "Prod Debug Toolkit",
+    "installed_by": {"id": "u302", "name": "Sana Deploy", "email": "sana.deploy@example.com"},
+    "authorized": false,
+    "timestamp": "2026-03-03T08:18:00Z"
+  },
+  {
+    "ticket_id": "CHG0019002",
+    "software_name": "Payroll Sync Patch",
+    "installed_by": {"id": "u303", "name": "Rita Change", "email": "rita.change@example.com"},
+    "authorized": true,
+    "timestamp": "2026-03-05T11:03:00Z"
+  }
+]
+

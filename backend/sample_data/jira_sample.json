@@ -1,0 +1,103 @@
+[
+  {
+    "key": "JIRA-1001",
+    "issue_type": "request",
+    "summary": "Provision finance analyst with reporting access",
+    "description": "New analyst requires access to quarterly reporting folders and an admin plugin for spreadsheet exports.",
+    "status": "Closed",
+    "requestor": {"id": "u100", "name": "Mira Patel", "email": "mira.patel@example.com"},
+    "approvals": [
+      {
+        "approver": {"id": "u100", "name": "Mira Patel", "email": "mira.patel@example.com"},
+        "timestamp": "2026-03-01T09:00:00Z",
+        "type": "manager",
+        "decision": "approved"
+      }
+    ],
+    "implementers": [
+      {"id": "u300", "name": "Leo Admin", "email": "leo.admin@example.com"}
+    ],
+    "created_at": "2026-03-01T08:15:00Z",
+    "updated_at": "2026-03-01T12:30:00Z",
+    "closed_at": "2026-03-01T12:30:00Z",
+    "workflow_steps": [
+      {"name": "onboarding_complete", "status": "done", "timestamp": "2026-03-01T11:45:00Z"}
+    ],
+    "transitions": [
+      {"from": "Open", "to": "In Review", "by": {"id": "u100", "name": "Mira Patel"}, "timestamp": "2026-03-01T08:30:00Z"},
+      {"from": "In Review", "to": "Implemented", "by": {"id": "u300", "name": "Leo Admin"}, "timestamp": "2026-03-01T10:20:00Z"},
+      {"from": "Implemented", "to": "Closed", "by": {"id": "u300", "name": "Leo Admin"}, "timestamp": "2026-03-01T12:30:00Z"}
+    ],
+    "comments": [
+      {"id": "c1", "author": {"id": "u100", "name": "Mira Patel"}, "timestamp": "2026-03-01T08:20:00Z", "body": "Please process quickly. I approve this for myself so we can move faster."},
+      {"id": "c2", "author": {"id": "u300", "name": "Leo Admin"}, "timestamp": "2026-03-01T10:20:00Z", "body": "Installed requested access and spreadsheet export plugin."}
+    ],
+    "attachments": [],
+    "custom_fields": {"risk_hint": "HIGH", "environment": "finance"}
+  },
+  {
+    "key": "JIRA-1002",
+    "issue_type": "request",
+    "summary": "Onboard contractor to procurement workspace",
+    "description": "Create workspace account and confirm onboarding tasks for contractor joining procurement team.",
+    "status": "Closed",
+    "requestor": {"id": "u101", "name": "Ava Chen", "email": "ava.chen@example.com"},
+    "approvals": [
+      {
+        "approver": {"id": "u201", "name": "R. Singh", "email": "r.singh@example.com"},
+        "timestamp": "2026-03-02T09:10:00Z",
+        "type": "manager",
+        "decision": "approved"
+      }
+    ],
+    "implementers": [
+      {"id": "u301", "name": "Nikhil Ops", "email": "nikhil.ops@example.com"}
+    ],
+    "created_at": "2026-03-02T08:00:00Z",
+    "updated_at": "2026-03-02T18:30:00Z",
+    "closed_at": "2026-03-02T18:00:00Z",
+    "workflow_steps": [
+      {"name": "onboarding_complete", "status": "done", "timestamp": "2026-03-02T19:30:00Z"}
+    ],
+    "transitions": [
+      {"from": "Open", "to": "Approved", "by": {"id": "u201", "name": "R. Singh"}, "timestamp": "2026-03-02T09:10:00Z"},
+      {"from": "Approved", "to": "In Progress", "by": {"id": "u301", "name": "Nikhil Ops"}, "timestamp": "2026-03-02T10:00:00Z"},
+      {"from": "In Progress", "to": "Closed", "by": {"id": "u301", "name": "Nikhil Ops"}, "timestamp": "2026-03-02T18:00:00Z"}
+    ],
+    "comments": [
+      {"id": "c10", "author": {"id": "u301", "name": "Nikhil Ops"}, "timestamp": "2026-03-02T17:55:00Z", "body": "Access created. Closing now to meet SLA."},
+      {"id": "c11", "author": {"id": "u401", "name": "HR Bot"}, "timestamp": "2026-03-02T19:30:00Z", "body": "Onboarding checklist completed after background check cleared."}
+    ],
+    "attachments": [],
+    "custom_fields": {"risk_hint": "MEDIUM", "environment": "procurement"}
+  },
+  {
+    "key": "JIRA-1003",
+    "issue_type": "change",
+    "summary": "Install debugging toolkit on production support host",
+    "description": "Support engineer requested a toolkit to inspect production performance during close week.",
+    "status": "Closed",
+    "requestor": {"id": "u102", "name": "Jordan Price", "email": "jordan.price@example.com"},
+    "approvals": [],
+    "implementers": [
+      {"id": "u302", "name": "Sana Deploy", "email": "sana.deploy@example.com"}
+    ],
+    "created_at": "2026-03-03T07:45:00Z",
+    "updated_at": "2026-03-03T15:00:00Z",
+    "closed_at": "2026-03-03T15:00:00Z",
+    "workflow_steps": [
+      {"name": "onboarding_complete", "status": "done", "timestamp": "2026-03-03T12:00:00Z"}
+    ],
+    "transitions": [
+      {"from": "Open", "to": "In Progress", "by": {"id": "u302", "name": "Sana Deploy"}, "timestamp": "2026-03-03T08:15:00Z"},
+      {"from": "In Progress", "to": "Closed", "by": {"id": "u302", "name": "Sana Deploy"}, "timestamp": "2026-03-03T15:00:00Z"}
+    ],
+    "comments": [
+      {"id": "c20", "author": {"id": "u302", "name": "Sana Deploy"}, "timestamp": "2026-03-03T08:20:00Z", "body": "Toolkit installed in production. No approver available, proceeding for urgent diagnostics."},
+      {"id": "c21", "author": {"id": "u302", "name": "Sana Deploy"}, "timestamp": "2026-03-03T14:55:00Z", "body": "Closing after quick smoke test."}
+    ],
+    "attachments": [],
+    "custom_fields": {"risk_hint": "HIGH", "environment": "production"}
+  }
+]
+

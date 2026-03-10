@@ -1,0 +1,192 @@
+import { useEffect, useMemo, useState } from "react";
+import toast from "react-hot-toast";
+import { api } from "../api/client";
+
+const seed = {
+  llm: { provider: "mock", deployment_name: "mock-llm", api_key: "", endpoint: "", api_version: "" },
+  servicenow: { instance_url: "", client_id: "", client_secret: "", table: "incident" },
+  notifications: { webhook_url: "", email_to: "audit@example.com" }
+};
+
+const sections = [
+  { key: "llm", title: "LLM Provider", fields: ["provider", "deployment_name", "api_key", "endpoint", "api_version"] },
+  { key: "servicenow", title: "ServiceNow", fields: ["instance_url", "client_id", "client_secret", "table"] },
+  { key: "notifications", title: "Notifications", fields: ["webhook_url", "email_to"] }
+];
+
+const ConnectionForms = ({ configs, onSaved }) => {
+  const existing = useMemo(() => {
+    const mapped = { ...seed };
+    configs.forEach((config) => {
+      mapped[config.config_type] = { ...mapped[config.config_type], ...config.data };
+    });
+    if (mapped.servicenow.username && !mapped.servicenow.client_id) {
+      mapped.servicenow.client_id = mapped.servicenow.username;
+    }
+    if (mapped.servicenow.password && !mapped.servicenow.client_secret) {
+      mapped.servicenow.client_secret = mapped.servicenow.password;
+    }
+    return mapped;
+  }, [configs]);
+
+  const [values, setValues] = useState(existing);
+  const [savingKey, setSavingKey] = useState("");
+  const [testingKey, setTestingKey] = useState("");
+  const [clearing, setClearing] = useState(false);
+  const [includeConfigs, setIncludeConfigs] = useState(false);
+
+  useEffect(() => {
+    setValues(existing);
+  }, [existing]);
+
+  const saveSection = async (configType) => {
+    setSavingKey(configType);
+    try {
+      await api.saveConfig({ config_type: configType, name: `${configType}-default`, data: values[configType] });
+      toast.success(`${configType} config saved`);
+      onSaved();
+    } catch (error) {
+      toast.error(`Failed to save ${configType} config`);
+    } finally {
+      setSavingKey("");
+    }
+  };
+
+  const testSection = async (configType) => {
+    setTestingKey(configType);
+    try {
+      if (configType === "llm") {
+        const result = await api.testLLM(values.llm);
+        if (result.skipped) {
+          toast(result.message || "Mock provider selected. Live connection test skipped.");
+          return;
+        }
+        if (!result.ok) {
+          toast.error(result.message || "LLM test failed");
+          return;
+        }
+        toast.success(result.message || `LLM test passed: ${result.provider}/${result.deployment_name}`);
+        return;
+      }
+      if (configType === "servicenow") {
+        const result = await api.testServiceNow(values.servicenow);
+        toast.success(result.message || `ServiceNow test passed: ${result.tickets_found} tickets available`);
+        return;
+      }
+      if (configType === "notifications") {
+        const result = await api.testNotifications(values.notifications);
+        toast.success(result.message || `Notification test passed: ${result.target}`);
+      }
+    } catch (error) {
+      toast.error(`Failed to test ${configType} connection`);
+    } finally {
+      setTestingKey("");
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-5 xl:grid-cols-2">
+        {sections.map((section) => (
+          <div key={section.key} className="panel p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="label">{section.title}</div>
+                <h3 className="mt-2 font-display text-2xl text-ink">Connection setup</h3>
+              </div>
+            </div>
+            <div className="mt-5 grid gap-4">
+              {section.fields.map((field) => (
+                <label key={field} className="block">
+                  <div className="mb-2 text-sm font-medium capitalize text-slate-600">{field.replaceAll("_", " ")}</div>
+                  {section.key === "llm" && field === "provider" ? (
+                    <select
+                      className="input"
+                      value={values[section.key]?.[field] ?? "mock"}
+                      onChange={(event) =>
+                        setValues((current) => ({
+                          ...current,
+                          [section.key]: { ...current[section.key], [field]: event.target.value }
+                        }))
+                      }
+                    >
+                      <option value="mock">mock</option>
+                      <option value="openai">openai</option>
+                      <option value="azure_openai">azure_openai</option>
+                      <option value="gemini">gemini</option>
+                    </select>
+                  ) : (
+                    <input
+                      className="input"
+                      type={field.toLowerCase().includes("password") || field.toLowerCase().includes("token") || field.toLowerCase().includes("key") || field.toLowerCase().includes("secret") ? "password" : "text"}
+                      placeholder={section.key === "llm" && field === "api_version" ? "optional — defaults to 2024-02-01" : ""}
+                      value={values[section.key]?.[field] ?? ""}
+                      onChange={(event) =>
+                        setValues((current) => ({
+                          ...current,
+                          [section.key]: { ...current[section.key], [field]: event.target.value }
+                        }))
+                      }
+                    />
+                  )}
+                </label>
+              ))}
+            </div>
+            <div className="mt-5 flex flex-wrap gap-3">
+              <button className="button-primary disabled:cursor-not-allowed disabled:opacity-60" disabled={Boolean(savingKey || testingKey || clearing)} onClick={() => saveSection(section.key)}>
+                {savingKey === section.key ? "Saving..." : "Save"}
+              </button>
+              <button className="button-secondary disabled:cursor-not-allowed disabled:opacity-60" disabled={Boolean(savingKey || testingKey || clearing)} onClick={() => testSection(section.key)}>
+                {testingKey === section.key ? "Testing..." : "Test"}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="panel border-rose-200 bg-rose-50/40 p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="label text-rose-700">Data management</div>
+            <h3 className="mt-2 text-2xl font-semibold text-rose-900">Clear Compliance Data</h3>
+            <p className="mt-2 text-sm text-rose-800">
+              This deletes all ingested tickets, rule results, alerts, runs, reports, and notifications from SQLite.
+            </p>
+            <label className="mt-3 inline-flex items-center gap-2 text-sm text-rose-900">
+              <input
+                type="checkbox"
+                checked={includeConfigs}
+                onChange={(event) => setIncludeConfigs(event.target.checked)}
+              />
+              Also delete saved configs (LLM/ServiceNow/Notifications and custom rules)
+            </label>
+          </div>
+          <button
+            className="rounded-lg bg-rose-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-800 disabled:opacity-60"
+            disabled={Boolean(savingKey || testingKey || clearing)}
+            onClick={async () => {
+              const msg = includeConfigs
+                ? "Delete all compliance data and saved configs?"
+                : "Delete all compliance data (keeping saved configs)?";
+              if (!window.confirm(msg)) return;
+              setClearing(true);
+              try {
+                const result = await api.clearComplianceData({ include_configs: includeConfigs });
+                toast.success(result.message || "Compliance data cleared");
+                onSaved();
+              } catch {
+                toast.error("Failed to clear compliance data");
+              } finally {
+                setClearing(false);
+              }
+            }}
+          >
+            {clearing ? "Clearing..." : "Clear Compliance Data"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default ConnectionForms;

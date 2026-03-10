@@ -1,0 +1,21 @@
+[
+  {
+    "ticket_id": "JIRA-1002",
+    "event": "background_check_pending",
+    "actor": {"id": "u401", "name": "HR Bot", "email": "hr.bot@example.com"},
+    "timestamp": "2026-03-02T17:40:00Z"
+  },
+  {
+    "ticket_id": "JIRA-1002",
+    "event": "onboarding_complete",
+    "actor": {"id": "u401", "name": "HR Bot", "email": "hr.bot@example.com"},
+    "timestamp": "2026-03-02T19:30:00Z"
+  },
+  {
+    "ticket_id": "CHG0019002",
+    "event": "validation_complete",
+    "actor": {"id": "u303", "name": "Rita Change", "email": "rita.change@example.com"},
+    "timestamp": "2026-03-05T17:20:00Z"
+  }
+]
+

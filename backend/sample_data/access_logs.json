@@ -1,0 +1,17 @@
+[
+  {
+    "ticket_id": "INC0019001",
+    "user": {"id": "u103", "name": "Priya Nair", "email": "priya.nair@example.com"},
+    "privilege": "admin",
+    "action": "granted",
+    "timestamp": "2026-03-04T12:30:00Z"
+  },
+  {
+    "ticket_id": "JIRA-1001",
+    "user": {"id": "u100", "name": "Mira Patel", "email": "mira.patel@example.com"},
+    "privilege": "reporting_access",
+    "action": "granted",
+    "timestamp": "2026-03-01T10:15:00Z"
+  }
+]
+
