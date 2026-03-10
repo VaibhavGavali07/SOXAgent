@@ -1,6 +1,0 @@
-Collecting apscheduler
-  Using cached apscheduler-3.11.2-py3-none-any.whl (64 kB)
-Collecting tzlocal>=3.0
-  Using cached tzlocal-5.3.1-py3-none-any.whl (18 kB)
-Installing collected packages: tzlocal, apscheduler
-Successfully installed apscheduler-3.11.2 tzlocal-5.3.1
