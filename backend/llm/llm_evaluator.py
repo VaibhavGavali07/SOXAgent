@@ -30,9 +30,26 @@ _RULE_KEY_MAP = {
 
 
 class LLMEvaluator:
-    def __init__(self, chat_provider, compliance_config: dict[str, Any] | None = None) -> None:
+    def __init__(self, chat_provider, compliance_config: dict[str, Any] | None = None, custom_rules: list[dict[str, Any]] | None = None) -> None:
         self.chat_provider = chat_provider
         self.compliance_config = compliance_config or {}
+        self.custom_rules = custom_rules or []
+
+    def _merged_catalog(self) -> list[tuple[str, str, str, list[str]]]:
+        """Return RULE_CATALOG + any active custom rules as tuples."""
+        catalog = list(RULE_CATALOG)
+        seen = {item[0] for item in catalog}
+        for rule in self.custom_rules:
+            rid = rule.get("rule_id", "")
+            if rid and rid not in seen and rule.get("active", True):
+                catalog.append((
+                    rid,
+                    rule.get("rule_name", rid),
+                    rule.get("severity", "MEDIUM"),
+                    rule.get("control_mapping") or [],
+                ))
+                seen.add(rid)
+        return catalog
 
     def evaluate_ticket(
         self,
@@ -41,7 +58,8 @@ class LLMEvaluator:
         run_id: str | None = None,
     ) -> tuple[LLMEvaluationModel, str, str]:
         resolved_run_id = run_id or str(uuid.uuid4())
-        prompt_text = build_ticket_prompt(ticket, retrieval_context, self.compliance_config)
+        merged_catalog = self._merged_catalog()
+        prompt_text = build_ticket_prompt(ticket, retrieval_context, self.compliance_config, extra_rules=self.custom_rules)
 
         if self.chat_provider.provider_name == "mock":
             raise ValueError(
@@ -70,7 +88,8 @@ class LLMEvaluator:
 
     def _parse_new_schema(self, data: dict[str, Any], ticket_id: str, run_id: str) -> dict[str, Any]:
         """Convert the new audit schema → LLMEvaluationModel-compatible dict."""
-        lookup = {item[0]: item for item in RULE_CATALOG}
+        merged = self._merged_catalog()
+        lookup = {item[0]: item for item in merged}
         final_status = (data.get("final_status") or "COMPLIANT").upper()
         overall = "non_compliant" if "NON_COMPLIANT" in final_status else "compliant"
 
@@ -114,7 +133,7 @@ class LLMEvaluator:
             })
 
         # Ensure every catalog rule is present
-        for rule_id, rule_name, severity, controls in RULE_CATALOG:
+        for rule_id, rule_name, severity, controls in merged:
             if rule_id not in seen_ids:
                 rules.append(self._needs_review_rule(rule_id, rule_name, severity, controls, ticket_id))
 
@@ -133,7 +152,8 @@ class LLMEvaluator:
 
     def _parse_legacy_schema(self, data: dict[str, Any], ticket_id: str, run_id: str) -> dict[str, Any]:
         """Fallback parser for old 8-rule schema or malformed responses."""
-        lookup = {item[0]: item for item in RULE_CATALOG}
+        merged = self._merged_catalog()
+        lookup = {item[0]: item for item in merged}
         data.setdefault("run_id", run_id)
         data.setdefault("ticket_id", ticket_id)
         data.setdefault("overall_assessment", "needs_review")
@@ -143,7 +163,7 @@ class LLMEvaluator:
         data.setdefault("missing_info", [])
 
         repaired: list[dict[str, Any]] = []
-        for rule_id, rule_name, severity, controls in RULE_CATALOG:
+        for rule_id, rule_name, severity, controls in merged:
             candidate = next((r for r in data["rules"] if r.get("rule_id") == rule_id), None)
             if not candidate:
                 candidate = self._needs_review_rule(rule_id, rule_name, severity, controls, ticket_id)

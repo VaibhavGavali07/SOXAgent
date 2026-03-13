@@ -124,6 +124,20 @@ def create_ticket(db: Session, canonical_ticket: dict[str, Any]) -> TicketRecord
     return record
 
 
+def get_existing_ticket_ids(db: Session, source: str, ticket_ids: list[str]) -> set[str]:
+    if not ticket_ids:
+        return set()
+    rows = db.scalars(
+        select(TicketRecord.ticket_id).where(
+            and_(
+                TicketRecord.source == source,
+                TicketRecord.ticket_id.in_(ticket_ids),
+            )
+        )
+    )
+    return set(rows)
+
+
 def get_ticket(db: Session, ticket_db_id: int) -> TicketRecord | None:
     return db.get(TicketRecord, ticket_db_id)
 
@@ -419,15 +433,37 @@ def get_alert(db: Session, alert_id: int) -> AlertRecord | None:
     return db.get(AlertRecord, alert_id)
 
 
+def acknowledge_alert(db: Session, alert_id: int) -> AlertRecord | None:
+    alert = db.get(AlertRecord, alert_id)
+    if not alert:
+        return None
+    if not alert.acknowledged_at:
+        alert.acknowledged_at = datetime.utcnow()
+        db.commit()
+        db.refresh(alert)
+    return alert
+
+
+def resolve_alert(db: Session, alert_id: int) -> AlertRecord | None:
+    alert = db.get(AlertRecord, alert_id)
+    if not alert:
+        return None
+    now = datetime.utcnow()
+    if not alert.acknowledged_at:
+        alert.acknowledged_at = now
+    if not alert.resolved_at:
+        alert.resolved_at = now
+        db.commit()
+        db.refresh(alert)
+    return alert
+
+
 def dashboard_summary(db: Session) -> dict[str, Any]:
-    tickets_analyzed = db.scalar(select(func.count()).select_from(TicketRecord)) or 0
+    ticket_summaries = list_ticket_summaries(db)
+    tickets_analyzed = len(ticket_summaries)
     violations_detected = db.scalar(select(func.count()).select_from(AlertRecord)) or 0
-    high_risk = db.scalar(
-        select(func.count()).select_from(AlertRecord).where(AlertRecord.severity == "HIGH")
-    ) or 0
-    medium_risk = db.scalar(
-        select(func.count()).select_from(AlertRecord).where(AlertRecord.severity == "MEDIUM")
-    ) or 0
+    high_risk = sum(1 for item in ticket_summaries if item["failed"] > 0 and item["priority"] == "HIGH")
+    medium_risk = sum(1 for item in ticket_summaries if item["failed"] > 0 and item["priority"] == "MEDIUM")
     sod_conflicts = db.scalar(
         select(func.count()).select_from(AlertRecord).where(
             AlertRecord.rule_id.in_(["ITGC-SOD-01", "R004"])
@@ -479,6 +515,21 @@ def dashboard_summary(db: Session) -> dict[str, Any]:
         ) or 0
         trend.append({"date": day.isoformat(), "violations": count})
 
+    resolved_count = db.scalar(
+        select(func.count()).select_from(AlertRecord).where(AlertRecord.resolved_at.isnot(None))
+    ) or 0
+    acked_count = db.scalar(
+        select(func.count()).select_from(AlertRecord).where(
+            and_(AlertRecord.acknowledged_at.isnot(None), AlertRecord.resolved_at.is_(None))
+        )
+    ) or 0
+    open_violations = violations_detected - resolved_count - acked_count
+
+    if violations_detected > 0:
+        audit_readiness = round((resolved_count * 1.0 + acked_count * 0.5) / violations_detected * 100)
+    else:
+        audit_readiness = 100 if total_checks > 0 else 100
+
     run = db.scalar(select(LLMRunRecord).order_by(desc(LLMRunRecord.created_at)))
     return {
         "stats": {
@@ -492,6 +543,10 @@ def dashboard_summary(db: Session) -> dict[str, Any]:
             "failed_checks": failed_checks,
             "needs_review_checks": review_checks,
             "total_checks": total_checks,
+            "resolved_violations": resolved_count,
+            "acknowledged_violations": acked_count,
+            "open_violations": open_violations,
+            "audit_readiness": audit_readiness,
         },
         "severity_breakdown": severity_breakdown,
         "control_breakdown": control_breakdown,
@@ -504,6 +559,8 @@ def dashboard_summary(db: Session) -> dict[str, Any]:
                 "severity": alert.severity,
                 "title": alert.title,
                 "created_at": alert.created_at.isoformat(),
+                "acknowledged_at": alert.acknowledged_at.isoformat() if alert.acknowledged_at else None,
+                "resolved_at": alert.resolved_at.isoformat() if alert.resolved_at else None,
             }
             for alert in recent_alerts
         ],

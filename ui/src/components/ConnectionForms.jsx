@@ -5,13 +5,13 @@ import { api } from "../api/client";
 const seed = {
   llm: { provider: "mock", deployment_name: "mock-llm", api_key: "", endpoint: "", api_version: "" },
   servicenow: { instance_url: "", client_id: "", client_secret: "", table: "incident" },
-  notifications: { webhook_url: "", email_to: "audit@example.com" }
+  notifications: { smtp_host: "", smtp_port: "587", smtp_user: "", smtp_password: "", email_from: "", email_to: "audit@example.com", webhook_url: "" }
 };
 
 const sections = [
   { key: "llm", title: "LLM Provider", fields: ["provider", "deployment_name", "api_key", "endpoint", "api_version"] },
   { key: "servicenow", title: "ServiceNow", fields: ["instance_url", "client_id", "client_secret", "table"] },
-  { key: "notifications", title: "Notifications", fields: ["webhook_url", "email_to"] }
+  { key: "notifications", title: "Email Notifications", fields: ["smtp_host", "smtp_port", "smtp_user", "smtp_password", "email_from", "email_to", "webhook_url"] }
 ];
 
 const ConnectionForms = ({ configs, onSaved }) => {

@@ -125,6 +125,7 @@ def build_ticket_prompt(
     ticket: dict[str, Any],
     retrieval_context: dict[str, Any] | None = None,
     compliance_config: dict[str, Any] | None = None,
+    extra_rules: list[dict[str, Any]] | None = None,
 ) -> str:
     compliance_config = compliance_config or {}
     approved_software = compliance_config.get("approved_software") or DEFAULT_APPROVED_SOFTWARE
@@ -159,8 +160,24 @@ Ticket metadata:
 - resolution_note: {resolution_note}
 - close_notes: {close_notes}"""
 
+    # Build controls text including custom rules
+    extra_controls = ""
+    if extra_rules:
+        for rule in extra_rules:
+            if not rule.get("active", True):
+                continue
+            rid = rule.get("rule_id", "")
+            rname = rule.get("rule_name", rid)
+            rseverity = rule.get("severity", "MEDIUM")
+            rdesc = rule.get("description", "")
+            if rdesc:
+                extra_controls += f"\n- key={rid} | id={rid} | name={rname} | severity={rseverity} | description={rdesc}"
+            else:
+                extra_controls += f"\n- key={rid} | id={rid} | name={rname} | severity={rseverity} | description=Evaluate this control for the given ticket."
+    controls_text = _CONTROLS_TEXT + extra_controls if extra_controls else _CONTROLS_TEXT
+
     software_block = f"Approved software list:\n{_format_list(approved_software)}"
-    controls_block = f"Controls to evaluate:\n{_CONTROLS_TEXT}"
+    controls_block = f"Controls to evaluate:\n{controls_text}"
     comments_block = f"Comment trail:\n{_format_comment_trail(comments)}"
     schema_block = f"Return ONLY strict JSON with this exact schema:\n{_RETURN_SCHEMA}"
 

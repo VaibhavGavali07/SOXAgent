@@ -132,6 +132,8 @@ class AlertRecord(Base, TimestampMixin):
     title: Mapped[str] = mapped_column(String(255))
     detail: Mapped[str] = mapped_column(Text)
     evidence_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class AuditReportRecord(Base, TimestampMixin):

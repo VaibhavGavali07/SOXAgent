@@ -261,9 +261,8 @@ const App = () => {
                 </div>
                 <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-200">
                   <div
-                    className={`h-full rounded-full transition-all duration-300 ${
-                      runProgress.status === "failed" ? "bg-rose-500" : "bg-teal-600"
-                    }`}
+                    className={`h-full rounded-full transition-all duration-300 ${runProgress.status === "failed" ? "bg-rose-500" : "bg-teal-600"
+                      }`}
                     style={{ width: `${progressPercent}%` }}
                   />
                 </div>
@@ -283,6 +282,7 @@ const App = () => {
                 runEvents={runEvents}
                 onRefresh={() => loadSummary({ initial: false })}
                 onOpenTickets={openTicketsWithFilters}
+                onRefreshSummary={() => loadSummary({ initial: false })}
               />
             ) : null}
             {activeTab === "violations" ? <Violations refreshKey={refreshKey} /> : null}

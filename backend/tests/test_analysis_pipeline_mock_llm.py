@@ -36,6 +36,7 @@ def test_fetch_and_store_results(tmp_path: Path):
     summary = client.get("/api/dashboard/summary")
     assert summary.status_code == 200
     assert summary.json()["stats"]["tickets_analyzed"] >= 3
+    first_ticket_count = summary.json()["stats"]["tickets_analyzed"]
 
     violations = client.get("/api/violations")
     assert violations.status_code == 200
@@ -54,3 +55,9 @@ def test_fetch_and_store_results(tmp_path: Path):
     assert rerun.status_code == 200
     assert rerun.json()["run_id"] != run_id
 
+    second_run = client.post("/api/fetch/servicenow", json={"filters": {}})
+    assert second_run.status_code == 200
+
+    summary_after_second_fetch = client.get("/api/dashboard/summary")
+    assert summary_after_second_fetch.status_code == 200
+    assert summary_after_second_fetch.json()["stats"]["tickets_analyzed"] == first_ticket_count

@@ -42,6 +42,11 @@ class ServiceNowTestRequest(BaseModel):
 class NotificationTestRequest(BaseModel):
     webhook_url: str | None = None
     email_to: str | None = None
+    smtp_host: str | None = None
+    smtp_port: int | None = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    email_from: str | None = None
 
 
 class ClearDataRequest(BaseModel):
@@ -214,15 +219,62 @@ def test_servicenow(request: ServiceNowTestRequest):
 
 
 @router.post("/notifications/test")
-def test_notifications(request: NotificationTestRequest):
+def test_notifications(request: NotificationTestRequest, db: Session = Depends(get_db)):
+    # If SMTP host is provided, do a real email test
+    smtp_host = request.smtp_host or ""
+    smtp_port = request.smtp_port or 587
+    smtp_user = request.smtp_user or ""
+    smtp_password = request.smtp_password or ""
+    email_from = request.email_from or smtp_user or ""
+    email_to = request.email_to or ""
+
+    # Try loading saved config for any missing fields
+    if not smtp_host or (not smtp_password and smtp_user):
+        saved = {}
+        for config in crud.list_configs(db):
+            if config.config_type == "notifications":
+                saved = dict(config.data)
+                break
+        if not smtp_host:
+            smtp_host = saved.get("smtp_host", "")
+        if not smtp_user:
+            smtp_user = saved.get("smtp_user", "")
+        if not smtp_password:
+            smtp_password = saved.get("smtp_password", "")
+        if not email_from:
+            email_from = saved.get("email_from", smtp_user)
+        if not email_to:
+            email_to = saved.get("email_to", "")
+        if not request.smtp_port:
+            smtp_port = int(saved.get("smtp_port", 587))
+
+    if smtp_host and email_to:
+        from backend.services.notification_service import NotificationService
+        result = NotificationService.test_email_connection(
+            smtp_host=smtp_host,
+            smtp_port=smtp_port,
+            smtp_user=smtp_user,
+            smtp_password=smtp_password,
+            email_from=email_from,
+            email_to=email_to,
+        )
+        return {
+            "ok": result["ok"],
+            "mock_mode": False,
+            "channel": "email",
+            "target": email_to,
+            "message": result["message"],
+        }
+
+    # If no SMTP configured, fall back to mock
     using_mock = os.getenv("MOCK_MODE", "true").lower() == "true" or not request.webhook_url
-    target = request.email_to or request.webhook_url or "mock-target"
+    target = email_to or request.webhook_url or "mock-target"
     return {
-        "ok": True,
+        "ok": not using_mock,
         "mock_mode": using_mock,
         "channel": "webhook" if request.webhook_url else "email",
         "target": target,
-        "message": "Notification test validated in mock mode." if using_mock else "Notification settings accepted for runtime use.",
+        "message": "Configure SMTP host and email_to to test real email delivery." if using_mock else "Notification settings accepted for runtime use.",
     }
 
 

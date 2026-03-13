@@ -54,7 +54,17 @@ class AnalyzerService:
         self.embedding_client = EmbeddingClient()
         self.notification_service = NotificationService(db)
         compliance_config = self._load_connector_config("compliance")
-        self.evaluator = LLMEvaluator(get_llm_provider(db), compliance_config=compliance_config)
+        custom_rules = self._load_custom_rules()
+        self.evaluator = LLMEvaluator(get_llm_provider(db), compliance_config=compliance_config, custom_rules=custom_rules)
+
+    def _load_custom_rules(self) -> list[dict[str, Any]]:
+        rules = []
+        for config in crud.list_configs(self.db):
+            if config.config_type == "rule":
+                data = dict(config.data)
+                if data.get("active", True):
+                    rules.append(data)
+        return rules
 
     def _load_connector_config(self, source: str) -> dict[str, Any]:
         for config in crud.list_configs(self.db):
@@ -73,11 +83,32 @@ class AnalyzerService:
         connector = ServiceNowConnector()
         fetched = connector.fetch(filters)
         tickets = fetched["tickets"]
-        crud.update_run(self.db, run_id, total_items=len(tickets), metadata={**filters, "source": source})
-        run_state_store.publish(run_id, {"status": "running", "message": f"Fetched {len(tickets)} tickets", "progress": 0})
+        existing_ticket_ids = crud.get_existing_ticket_ids(self.db, source, [ticket["ticket_id"] for ticket in tickets])
+        new_tickets = [ticket for ticket in tickets if ticket["ticket_id"] not in existing_ticket_ids]
+        crud.update_run(
+            self.db,
+            run_id,
+            total_items=len(new_tickets),
+            metadata={
+                **filters,
+                "source": source,
+                "fetched_tickets": len(tickets),
+                "existing_tickets": len(existing_ticket_ids),
+                "new_tickets": len(new_tickets),
+            },
+        )
+        run_state_store.publish(
+            run_id,
+            {
+                "status": "running",
+                "message": f"Fetched {len(tickets)} tickets; {len(new_tickets)} new tickets to analyze",
+                "progress": 0,
+                "total": len(new_tickets),
+            },
+        )
 
         alert_payloads: list[dict[str, Any]] = []
-        for index, ticket in enumerate(tickets, start=1):
+        for index, ticket in enumerate(new_tickets, start=1):
             self._persist_raw_records(source, fetched, ticket["ticket_id"])
             ticket_row = crud.create_ticket(self.db, ticket)
             self._persist_embeddings(ticket_row.id, ticket)
@@ -132,7 +163,7 @@ class AnalyzerService:
                     "status": "running",
                     "message": f'Analyzed {ticket["ticket_id"]}',
                     "progress": index,
-                    "total": len(tickets),
+                    "total": len(new_tickets),
                     "ticket_db_id": ticket_row.id,
                     "failed_rules": [result.rule_id for result in results if result.status == "FAIL"],
                 },

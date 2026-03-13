@@ -9,7 +9,14 @@ const request = async (path, options = {}) => {
     ...options
   });
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    let detail = "";
+    try {
+      const errorBody = await response.json();
+      detail = errorBody?.detail || "";
+    } catch {
+      detail = "";
+    }
+    throw new Error(detail || `Request failed: ${response.status}`);
   }
   return response.json();
 };
@@ -30,8 +37,11 @@ export const api = {
   dashboardSummary: () => request("/api/dashboard/summary"),
   violations: (params = {}) => request(`/api/violations?${new URLSearchParams(params).toString()}`),
   violation: (alertId) => request(`/api/violations/${alertId}`),
+  acknowledgeViolation: (alertId) => request(`/api/violations/${alertId}/acknowledge`, { method: "PATCH" }),
+  resolveViolation: (alertId) => request(`/api/violations/${alertId}/resolve`, { method: "PATCH" }),
   tickets: (params = {}) => request(`/api/tickets?${new URLSearchParams(params).toString()}`),
   ticket: (ticketDbId) => request(`/api/tickets/${ticketDbId}`),
   rules: () => request("/api/rules"),
-  createRule: (payload) => request("/api/rules", { method: "POST", body: JSON.stringify(payload) })
+  createRule: (payload) => request("/api/rules", { method: "POST", body: JSON.stringify(payload) }),
+  updateRule: (ruleId, payload) => request(`/api/rules/${encodeURIComponent(ruleId)}`, { method: "PUT", body: JSON.stringify(payload) })
 };
