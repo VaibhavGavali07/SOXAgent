@@ -35,13 +35,16 @@ class ServiceNowConnector:
         # Collect all sys_ids for batch enrichment
         sys_ids = [r.get("sys_id", "") for r in raw_tickets if r.get("sys_id")]
 
-        # Fetch activity (comments/work notes) and approvals in batch
+        # Fetch activity (comments/work notes), approvals, and attachments in batch
         activity_by_sys_id = self._fetch_activity(instance_url, token, sys_ids)
         approvals_by_sys_id = self._fetch_approvals(instance_url, token, sys_ids)
+        attachments_by_sys_id = self._fetch_attachments_batch(instance_url, token, sys_ids)
 
         tickets = [
             normalize_servicenow_ticket(
-                self._map_raw_ticket(raw, table, instance_url, activity_by_sys_id, approvals_by_sys_id),
+                self._map_raw_ticket(
+                    raw, table, instance_url, activity_by_sys_id, approvals_by_sys_id, attachments_by_sys_id
+                ),
                 {},
             )
             for raw in raw_tickets
@@ -147,6 +150,64 @@ class ServiceNowConnector:
             result.setdefault(did, []).append(entry)
         return result
 
+    def _fetch_attachments_batch(
+        self, instance_url: str, token: str, sys_ids: list[str]
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Fetch attachment metadata for all tickets in one API call.
+
+        Returns a dict mapping sys_id → list of attachment metadata dicts.
+        Each entry has: sys_id, file_name, content_type, size_bytes, download_link.
+        """
+        if not sys_ids:
+            return {}
+        id_list = ",".join(sys_ids)
+        try:
+            resp = requests.get(
+                f"{instance_url}/api/now/attachment",
+                headers={"Authorization": f"Bearer {token}"},
+                params={
+                    "sysparm_query": f"table_sys_id IN {id_list}",
+                    "sysparm_fields": "sys_id,file_name,content_type,size_bytes,table_sys_id",
+                    "sysparm_limit": 500,
+                },
+                timeout=30,
+            )
+            resp.raise_for_status()
+        except Exception:
+            return {}
+
+        result: dict[str, list[dict[str, Any]]] = {}
+        for entry in resp.json().get("result", []):
+            tsid = entry.get("table_sys_id", "")
+            result.setdefault(tsid, []).append({
+                "sys_id": entry.get("sys_id", ""),
+                "file_name": entry.get("file_name", ""),
+                "content_type": entry.get("content_type", ""),
+                "size_bytes": entry.get("size_bytes", 0),
+                "download_link": (
+                    f"{instance_url}/api/now/attachment/{entry['sys_id']}/file"
+                    if entry.get("sys_id") else ""
+                ),
+            })
+        return result
+
+    def download_attachment(self, download_link: str, token: str) -> bytes | None:
+        """Download raw bytes for a single attachment. Returns None on failure."""
+        if not download_link:
+            return None
+        try:
+            resp = requests.get(
+                download_link,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            return resp.content
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("download_attachment failed for %s: %s", download_link, exc)
+            return None
+
     # ------------------------------------------------------------------ mapping
 
     def _map_raw_ticket(
@@ -156,6 +217,7 @@ class ServiceNowConnector:
         instance_url: str,
         activity_by_sys_id: dict[str, list[dict[str, Any]]],
         approvals_by_sys_id: dict[str, list[dict[str, Any]]],
+        attachments_by_sys_id: dict[str, list[dict[str, Any]]] | None = None,
     ) -> dict[str, Any]:
         record_type_map = {
             "incident": "incident",
@@ -194,6 +256,20 @@ class ServiceNowConnector:
 
         ticket_url = f"{instance_url}/{table}.do?sys_id={sys_id}" if sys_id else ""
 
+        # Build attachment list — include only entries with a valid sys_id
+        raw_attachments = (attachments_by_sys_id or {}).get(sys_id, [])
+        attachments = [
+            {
+                "id": att["sys_id"],
+                "name": att["file_name"],
+                "url": att["download_link"],
+                "content_type": att.get("content_type", ""),
+                "size_bytes": att.get("size_bytes", 0),
+            }
+            for att in raw_attachments
+            if att.get("sys_id")
+        ]
+
         return {
             "number": raw.get("number", ""),
             "record_type": record_type_map.get(table, "incident"),
@@ -211,7 +287,7 @@ class ServiceNowConnector:
             "workflow_steps": [],
             "state_transitions": [],
             "activity": comments,
-            "attachments": [],
+            "attachments": attachments,
             "custom_fields": {
                 "risk_hint": self._priority_to_risk(raw.get("priority", "")),
                 "category": raw.get("category", ""),

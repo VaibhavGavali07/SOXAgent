@@ -82,11 +82,13 @@ def list_rules(db: Session = Depends(get_db)):
                 }
             )
 
-    # Apply overrides to defaults
+    # Apply overrides to defaults, skipping any marked as deleted
     merged_defaults = []
     for rule in defaults:
         if rule["rule_id"] in overrides:
             override = overrides[rule["rule_id"]]
+            if override.get("deleted"):
+                continue  # rule was removed by the user
             merged_defaults.append({
                 **rule,
                 "rule_name": override.get("rule_name", rule["rule_name"]),
@@ -137,6 +139,25 @@ def create_rule(request: RuleCreateRequest, db: Session = Depends(get_db)):
         "severity": request.severity,
         "active": request.active,
     }
+
+
+@router.delete("/rules/{rule_id}")
+def delete_rule(rule_id: str, db: Session = Depends(get_db)):
+    normalized_rule_id = rule_id.strip().upper()
+    default_ids = {rule["rule_id"] for rule in _default_rules()}
+    if normalized_rule_id in default_ids:
+        # Default rules live only in RULE_CATALOG (not in DB), so "delete" means
+        # store a disabled+deleted override so list_rules filters it out.
+        crud.upsert_config(db, "rule", normalized_rule_id, {
+            "rule_id": normalized_rule_id,
+            "deleted": True,
+            "active": False,
+        })
+    else:
+        deleted = crud.delete_config(db, "rule", normalized_rule_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"Rule {normalized_rule_id} not found")
+    return {"deleted": normalized_rule_id}
 
 
 @router.put("/rules/{rule_id}")

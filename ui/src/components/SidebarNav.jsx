@@ -1,3 +1,5 @@
+import soxLogo from "../assets/sox-logo.svg";
+
 const Icon = ({ path }) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4">
     <path d={path} strokeLinecap="round" strokeLinejoin="round" />
@@ -30,17 +32,19 @@ const SidebarNav = ({ activeTab, onChange }) => {
   ];
 
   return (
-    <aside className="flex w-full flex-col bg-[#081633] text-white lg:sticky lg:top-0 lg:h-screen lg:w-[240px] lg:flex-shrink-0 lg:overflow-y-auto">
-      <div className="border-b border-white/10 px-6 py-7">
-        <div className="flex items-start gap-3">
-          <div className="mt-1 rounded-full border border-white/15 bg-white/5 p-2 text-cyan-200">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4">
-              <path d="M12 3 5 6v5c0 5 3.4 8.8 7 10 3.6-1.2 7-5 7-10V6l-7-3Zm0 5 1.1 2.3 2.5.4-1.8 1.8.4 2.5-2.2-1.2-2.2 1.2.4-2.5-1.8-1.8 2.5-.4L12 8Z" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+    <aside className="scanline relative flex w-full flex-col bg-[#060D1F] text-white lg:sticky lg:top-0 lg:h-screen lg:w-[260px] lg:flex-shrink-0 lg:overflow-y-auto">
+      {/* top cyan accent line */}
+      <div className="h-[2px] w-full bg-gradient-to-r from-transparent via-cyan-400 to-transparent opacity-70" />
+
+      <div className="border-b border-cyan-900/40 px-6 py-6">
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <img src={soxLogo} alt="SOX Agent" className="h-11 w-11 shrink-0 drop-shadow-[0_0_8px_rgba(34,211,238,0.5)]" />
+            <span className="absolute -bottom-1 -right-1 h-2.5 w-2.5 rounded-full bg-cyan-400 shadow-[0_0_6px_2px_rgba(34,211,238,0.6)]" />
           </div>
           <div>
-            <div className="text-lg font-semibold">SOX Compliance</div>
-            <p className="mt-1 text-sm leading-5 text-slate-300">SOX compliance audit readiness</p>
+            <div className="text-lg font-bold tracking-tight text-white">SOX Agent</div>
+            <p className="mt-0.5 text-xs leading-4 text-cyan-400/80">ITGC Compliance AI</p>
           </div>
         </div>
       </div>
@@ -48,7 +52,7 @@ const SidebarNav = ({ activeTab, onChange }) => {
       <div className="flex-1 space-y-8 px-3 py-5">
         {groups.map((group) => (
           <div key={group.label}>
-            <div className="px-3 text-xs uppercase tracking-[0.22em] text-slate-400">{group.label}</div>
+            <div className="px-3 text-[10px] uppercase tracking-[0.28em] text-cyan-500/50">{group.label}</div>
             <div className="mt-3 space-y-1">
               {group.items.map((item) => {
                 const isActive = activeTab === item.id;
@@ -56,14 +60,19 @@ const SidebarNav = ({ activeTab, onChange }) => {
                   <button
                     key={item.id}
                     onClick={() => onChange(item.id)}
-                    className={`flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-medium transition ${
-                      isActive ? "bg-[#2b53d0] text-white" : "text-slate-200 hover:bg-white/5"
+                    className={`sidebar-item-enter flex w-full items-center gap-3.5 rounded-lg px-4 py-3.5 text-left text-base font-medium transition-all duration-200 hover:translate-x-1 ${
+                      isActive
+                        ? "sidebar-active-glow bg-cyan-500/10 text-cyan-200"
+                        : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
                     }`}
                   >
-                    <span className={`${isActive ? "text-white" : "text-slate-300"}`}>
-                      <Icon path={icons[item.id]} />
+                    <span className={`transition-colors ${isActive ? "text-cyan-400" : "text-slate-500 group-hover:text-slate-300"}`}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+                        <path d={icons[item.id]} strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
                     </span>
                     <span>{item.label}</span>
+                    {isActive && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-[0_0_6px_2px_rgba(34,211,238,0.5)]" />}
                   </button>
                 );
               })}
@@ -72,7 +81,7 @@ const SidebarNav = ({ activeTab, onChange }) => {
         ))}
       </div>
 
-      <div className="border-t border-white/10 px-6 py-4 text-xs text-slate-400">v1.0.0 | ITGC SOX Agent</div>
+      <div className="border-t border-cyan-900/30 px-6 py-4 text-[10px] tracking-widest text-slate-600">v1.0.0 · ITGC SOX</div>
     </aside>
   );
 };

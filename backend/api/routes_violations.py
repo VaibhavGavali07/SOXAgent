@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.llm.rule_ids import canonical_rule_id
 from backend.storage import crud
 from backend.storage.db import get_db
+
+
+class AckRequest(BaseModel):
+    risk_note: str | None = None
 
 
 router = APIRouter(prefix="/api", tags=["violations"])
@@ -46,20 +51,23 @@ def get_violations(
             "created_at": alert.created_at.isoformat(),
             "acknowledged_at": alert.acknowledged_at.isoformat() if alert.acknowledged_at else None,
             "resolved_at": alert.resolved_at.isoformat() if alert.resolved_at else None,
+            "risk_note": alert.risk_note,
         }
         for alert in alerts
     ]
 
 
 @router.patch("/violations/{alert_id}/acknowledge")
-def acknowledge_violation(alert_id: int, db: Session = Depends(get_db)):
-    alert = crud.acknowledge_alert(db, alert_id)
+def acknowledge_violation(alert_id: int, body: AckRequest = None, db: Session = Depends(get_db)):
+    note = body.risk_note if body else None
+    alert = crud.acknowledge_alert(db, alert_id, risk_note=note)
     if not alert:
         return {"error": "Alert not found"}
     return {
         "id": alert.id,
         "ticket_id": alert.ticket_id,
         "ack_status": _alert_status(alert),
+        "risk_note": alert.risk_note,
         "acknowledged_at": alert.acknowledged_at.isoformat() if alert.acknowledged_at else None,
         "resolved_at": alert.resolved_at.isoformat() if alert.resolved_at else None,
     }

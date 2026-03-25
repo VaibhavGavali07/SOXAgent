@@ -1,10 +1,30 @@
+"""LLM prompt construction for SOX ITGC compliance analysis.
+
+Key design decisions
+--------------------
+1. **Prompt ordering for OpenAI prefix caching**
+   Static content (instructions, controls, schema, software list) is placed
+   BEFORE dynamic content (ticket metadata, comments, retrieved context).
+   OpenAI caches prompt prefixes ≥ 1 024 tokens at 50 % cost — keeping the
+   static prefix identical across all tickets maximises cache hits.
+
+2. **Retrieval context is now actually used**
+   `build_ticket_prompt` previously accepted `retrieval_context` but silently
+   discarded it.  It now injects:
+     - Policy snippets retrieved by PolicyRAG (relevant SOX clauses)
+     - Similar past violations as few-shot examples (improves consistency)
+
+3. **Controls stay fixed (all 4 evaluated every time)**
+   This is correct by design — the LLM must at minimum consider each control
+   and mark inapplicable ones as such.
+"""
 from __future__ import annotations
 
 import hashlib
 from typing import Any
 
 # ---------------------------------------------------------------------------
-# Default compliance reference data (override via "compliance" config in DB)
+# Default approved-software list (override via "compliance" config in DB)
 # ---------------------------------------------------------------------------
 
 DEFAULT_APPROVED_SOFTWARE: list[str] = [
@@ -15,7 +35,10 @@ DEFAULT_APPROVED_SOFTWARE: list[str] = [
     "Windows Defender", "7-Zip", "Adobe Acrobat Reader", "Notepad++",
 ]
 
-# Controls injected into every prompt
+# ---------------------------------------------------------------------------
+# Static sections  (placed first so OpenAI prefix cache covers them)
+# ---------------------------------------------------------------------------
+
 _CONTROLS_TEXT = """\
 - key=SELF_APPROVAL | id=ITGC-AC-01 | name=Self-Approval Prevention | severity=High | description=Requestor and approval provider must be different individuals.
 - key=MISSING_DOCUMENTATION | id=ITGC-WF-01 | name=Missing Closure Documentation | severity=Medium | description=Closed tickets must include a meaningful closer resolution comment or equivalent closure evidence.
@@ -102,6 +125,9 @@ Decision quality rules:
 - Do not wrap JSON in markdown fences.
 - Do not add commentary before or after JSON."""
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _format_comment_trail(comments: list[dict[str, Any]]) -> str:
     if not comments:
@@ -116,10 +142,74 @@ def _format_comment_trail(comments: list[dict[str, Any]]) -> str:
 
 
 def _format_list(items: list[str]) -> str:
-    if not items:
-        return "Not configured"
-    return ", ".join(items)
+    return ", ".join(items) if items else "Not configured"
 
+
+def _format_policy_snippets(snippets: list[dict[str, str]]) -> str:
+    if not snippets:
+        return ""
+    lines = []
+    for s in snippets:
+        lines.append(f"- [{s.get('control_id', '')}] {s.get('title', '')}: {s.get('snippet', '')}")
+    return "Relevant SOX policy references:\n" + "\n".join(lines)
+
+
+def _format_screenshot_approvals(approvals: list[dict[str, Any]]) -> str:
+    """Format vision-extracted screenshot approval data for LLM context.
+
+    This section appears before ticket metadata so the LLM can reference it
+    when evaluating ITGC-AC-04 (Missing Approval) and ITGC-AC-01 (Self-Approval).
+    """
+    if not approvals:
+        return ""
+    lines = ["Screenshot evidence found in ticket attachments (extracted by vision AI):"]
+    for apv in approvals:
+        filename = apv.get("filename", "screenshot")
+        approver = apv.get("approver") or "unknown"
+        approval_text = apv.get("approval_text") or ""
+        timestamp = apv.get("timestamp") or ""
+        status = apv.get("approval_status", "unknown")
+        confidence = apv.get("confidence", 0.0)
+        summary = apv.get("summary", "")
+        line = f"- [{filename}] Approver: {approver} | Status: {status} | Confidence: {confidence:.0%}"
+        if timestamp:
+            line += f" | Time: {timestamp}"
+        if approval_text:
+            line += f'\n  Approval text: "{approval_text}"'
+        if summary:
+            line += f"\n  Summary: {summary}"
+        lines.append(line)
+    lines.append(
+        "Use the above screenshot evidence when evaluating ITGC-AC-04 (Missing Approval) "
+        "and ITGC-AC-01 (Self-Approval Prevention)."
+    )
+    return "\n".join(lines)
+
+
+def _format_similar_violations(violations: list[dict[str, Any]]) -> str:
+    """Format past similar violations as few-shot examples.
+
+    These help the LLM produce consistent verdicts by showing how comparable
+    tickets were handled in the past.
+    """
+    if not violations:
+        return ""
+    lines = ["Precedents from similar past tickets (use as guidance, not rules):"]
+    for v in violations[:3]:
+        ticket_id = v.get("ticket_id") or v.get("entity_id") or v.get("id", "unknown")
+        sim = v.get("similarity", 0)
+        failed = v.get("failed_rules", "")
+        preview = v.get("preview") or v.get("text", "")[:150]
+        if failed:
+            lines.append(f"- {ticket_id} (similarity {sim:.2f}): {preview!r} → FAILed: {failed}")
+        else:
+            lines.append(f"- {ticket_id} (similarity {sim:.2f}): {preview!r}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Main builder
+# ---------------------------------------------------------------------------
 
 def build_ticket_prompt(
     ticket: dict[str, Any],
@@ -128,6 +218,7 @@ def build_ticket_prompt(
     extra_rules: list[dict[str, Any]] | None = None,
 ) -> str:
     compliance_config = compliance_config or {}
+    retrieval_context = retrieval_context or {}
     approved_software = compliance_config.get("approved_software") or DEFAULT_APPROVED_SOFTWARE
 
     requestor = ticket.get("requestor") or {}
@@ -144,23 +235,7 @@ def build_ticket_prompt(
     resolution_note = custom.get("resolution_note") or ticket.get("status") or ""
     doc_link = custom.get("documentation_link") or ticket.get("status") or ""
 
-    metadata_block = f"""\
-Ticket metadata:
-- ticket_key: {ticket.get("ticket_id", "")}
-- source: ServiceNow
-- status: {ticket.get("status", "")}
-- title: {ticket.get("summary", "")}
-- description: {ticket.get("description", "")}
-- summary: {ticket.get("summary", "")}
-- requestor_id: {requestor_name}
-- approver_id: {approver_name}
-- implementer_id: {implementer_name}
-- closed_by/resolved_by: {resolved_by}
-- documentation_link: {doc_link}
-- resolution_note: {resolution_note}
-- close_notes: {close_notes}"""
-
-    # Build controls text including custom rules
+    # Build controls text — fixed 4 + any active custom rules
     extra_controls = ""
     if extra_rules:
         for rule in extra_rules:
@@ -168,27 +243,73 @@ Ticket metadata:
                 continue
             rid = rule.get("rule_id", "")
             rname = rule.get("rule_name", rid)
-            rseverity = rule.get("severity", "MEDIUM")
-            rdesc = rule.get("description", "")
-            if rdesc:
-                extra_controls += f"\n- key={rid} | id={rid} | name={rname} | severity={rseverity} | description={rdesc}"
-            else:
-                extra_controls += f"\n- key={rid} | id={rid} | name={rname} | severity={rseverity} | description=Evaluate this control for the given ticket."
+            rsev = rule.get("severity", "MEDIUM")
+            rdesc = rule.get("description") or "Evaluate this control for the given ticket."
+            extra_controls += f"\n- key={rid} | id={rid} | name={rname} | severity={rsev} | description={rdesc}"
     controls_text = _CONTROLS_TEXT + extra_controls if extra_controls else _CONTROLS_TEXT
 
-    software_block = f"Approved software list:\n{_format_list(approved_software)}"
-    controls_block = f"Controls to evaluate:\n{controls_text}"
-    comments_block = f"Comment trail:\n{_format_comment_trail(comments)}"
-    schema_block = f"Return ONLY strict JSON with this exact schema:\n{_RETURN_SCHEMA}"
+    # ---------------------------------------------------------------
+    # Section assembly — STATIC FIRST (maximises OpenAI prefix cache)
+    # ---------------------------------------------------------------
 
-    sections = [
+    # 1. Static: system instructions (rarely changes)
+    # 2. Static: controls definition (changes only when custom rules added)
+    # 3. Static: return schema (never changes)
+    # 4. Semi-static: approved software list (changes occasionally)
+    # 5. Dynamic: retrieved policy context (varies per ticket)
+    # 6. Dynamic: few-shot similar violations (varies per ticket)
+    # 7. Dynamic: ticket metadata (unique per ticket)
+    # 8. Dynamic: comment trail (unique per ticket)
+
+    sections: list[str] = [
         _SYSTEM_INSTRUCTIONS,
-        metadata_block,
-        software_block,
-        controls_block,
-        comments_block,
-        schema_block,
+        f"Controls to evaluate:\n{controls_text}",
+        f"Return ONLY strict JSON with this exact schema:\n{_RETURN_SCHEMA}",
+        f"Approved software list:\n{_format_list(approved_software)}",
     ]
+
+    # Retrieved policy snippets (from PolicyRAG)
+    policy_snippets = retrieval_context.get("policy_snippets") or []
+    if policy_snippets:
+        policy_block = _format_policy_snippets(policy_snippets)
+        if policy_block:
+            sections.append(policy_block)
+
+    # Few-shot similar violations (from ChromaDB)
+    similar_violations = retrieval_context.get("similar_violations") or []
+    if similar_violations:
+        violations_block = _format_similar_violations(similar_violations)
+        if violations_block:
+            sections.append(violations_block)
+
+    # Screenshot approval evidence (vision AI extraction)
+    screenshot_approvals = retrieval_context.get("screenshot_approvals") or []
+    if screenshot_approvals:
+        screenshot_block = _format_screenshot_approvals(screenshot_approvals)
+        if screenshot_block:
+            sections.append(screenshot_block)
+
+    # Ticket metadata
+    sections.append(
+        f"Ticket metadata:\n"
+        f"- ticket_key: {ticket.get('ticket_id', '')}\n"
+        f"- source: ServiceNow\n"
+        f"- status: {ticket.get('status', '')}\n"
+        f"- title: {ticket.get('summary', '')}\n"
+        f"- description: {ticket.get('description', '')}\n"
+        f"- summary: {ticket.get('summary', '')}\n"
+        f"- requestor_id: {requestor_name}\n"
+        f"- approver_id: {approver_name}\n"
+        f"- implementer_id: {implementer_name}\n"
+        f"- closed_by/resolved_by: {resolved_by}\n"
+        f"- documentation_link: {doc_link}\n"
+        f"- resolution_note: {resolution_note}\n"
+        f"- close_notes: {close_notes}"
+    )
+
+    # Comment trail
+    sections.append(f"Comment trail:\n{_format_comment_trail(comments)}")
+
     return "\n\n".join(sections)
 
 

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/gaval/Downloads/Study/Agents/SOXAgent/**)",
+      "Bash(pip install:*)",
+      "Bash(python -c \"import chromadb; print\\(chromadb.__version__\\)\")",
+      "Bash(python -c \":*)",
+      "Read(//c/Users/gaval/.claude/projects/c--Users-gaval-Downloads-Study-Agents-SOXAgent/memory/**)"
+    ]
+  }
+}

@@ -88,6 +88,12 @@ const App = () => {
     bootstrap();
   }, []);
 
+  useEffect(() => {
+    if (activeTab === "connections" && backendOnline !== false) {
+      loadConfigs();
+    }
+  }, [activeTab]);
+
   const handleRunStarted = (nextRunId) => {
     setRunId(nextRunId);
     setRunEvents([]);
@@ -209,20 +215,22 @@ const App = () => {
       <div className="flex min-h-screen flex-col lg:flex-row lg:items-start">
         <SidebarNav activeTab={activeTab} onChange={setActiveTab} />
         <main className="min-w-0 flex-1">
-          <div className="border-b border-slate-200 bg-white px-6 py-5 lg:px-8">
+          <div className="header-shimmer relative border-b border-cyan-900/50 px-6 py-5 lg:px-8">
+            {/* bottom cyan accent line */}
+            <div className="absolute bottom-0 left-0 h-[1px] w-full bg-gradient-to-r from-transparent via-cyan-500/60 to-transparent" />
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
-                <h1 className="text-2xl font-semibold text-slate-900">Compliance Dashboard</h1>
-                <p className="mt-1 text-sm text-slate-500">Real-time ITGC monitoring across ServiceNow</p>
+                <h1 className="text-2xl font-semibold tracking-tight text-white drop-shadow-[0_0_12px_rgba(34,211,238,0.3)]">Compliance Dashboard</h1>
+                <p className="mt-1 text-sm text-cyan-300/60">Real-time ITGC monitoring across ServiceNow</p>
                 {backendOnline === false ? (
-                  <p className="mt-2 text-sm font-medium text-rose-600">
+                  <p className="mt-2 text-sm font-medium text-rose-200">
                     Backend is offline at {api.apiBase}. Start FastAPI and click Retry Connection.
                   </p>
                 ) : null}
               </div>
               <div className="flex flex-wrap items-center gap-3">
                 <button
-                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                  className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm font-medium text-cyan-200 transition hover:border-cyan-400/50 hover:bg-cyan-500/20 hover:text-cyan-100"
                   onClick={async () => {
                     const online = await checkBackend();
                     if (online) {
@@ -237,31 +245,40 @@ const App = () => {
                   Retry Connection
                 </button>
                 <button
-                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                  className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm font-medium text-cyan-200 transition hover:border-cyan-400/50 hover:bg-cyan-500/20 hover:text-cyan-100 disabled:opacity-40"
                   disabled={Boolean(runningSource) || backendOnline === false}
                   onClick={() => setShowRunModal(true)}
                 >
                   {runningSource === "all" ? "Fetching Tickets..." : "Fetch Now Tickets"}
                 </button>
-                <div className="flex items-center gap-2 text-sm font-medium text-emerald-600">
-                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+                <div className="flex items-center gap-2 text-sm font-medium text-emerald-300">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_6px_2px_rgba(52,211,153,0.6)]" />
+                  </span>
                   <span>Monitoring Active</span>
                 </div>
+                <img
+                  src="/jade-global.png"
+                  alt="Jade Global"
+                  className="h-20 shrink-0 object-contain"
+                  onError={(e) => { e.currentTarget.style.display = "none"; }}
+                />
               </div>
             </div>
             {showProgress ? (
-              <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="mt-4 rounded-xl border border-white/20 bg-white/10 p-3">
                 <div className="flex items-center justify-between gap-4 text-sm">
-                  <div className="font-medium text-slate-700">
+                  <div className="font-medium text-white">
                     {runProgress.message || "Compliance scan in progress"}
                   </div>
-                  <div className="text-slate-600">
+                  <div className="text-white/70">
                     {runProgress.status === "completed" ? "Completed" : `${progressPercent}%`}
                   </div>
                 </div>
-                <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-200">
+                <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/20">
                   <div
-                    className={`h-full rounded-full transition-all duration-300 ${runProgress.status === "failed" ? "bg-rose-500" : "bg-teal-600"
+                    className={`h-full rounded-full transition-all duration-300 ${runProgress.status === "failed" ? "bg-rose-400" : "bg-emerald-300"
                       }`}
                     style={{ width: `${progressPercent}%` }}
                   />

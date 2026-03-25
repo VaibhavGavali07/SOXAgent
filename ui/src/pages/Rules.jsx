@@ -33,6 +33,7 @@ const Rules = () => {
   const [editingRuleId, setEditingRuleId] = useState(null);
   const [editForm, setEditForm] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const loadRules = async () => {
     setLoading(true);
@@ -123,6 +124,22 @@ const Rules = () => {
   const cancelEdit = () => {
     setEditingRuleId(null);
     setEditForm(null);
+  };
+
+  const deleteRule = async (rule) => {
+    if (!window.confirm(`Remove rule "${rule.rule_id} — ${rule.rule_name}"?\n\nThis cannot be undone.`)) return;
+    setDeleting(true);
+    try {
+      await api.deleteRule(rule.rule_id);
+      toast.success(`Rule ${rule.rule_id} removed`);
+      setEditingRuleId(null);
+      setEditForm(null);
+      await loadRules();
+    } catch (error) {
+      toast.error(error?.message || "Failed to remove rule");
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const saveEdit = async () => {
@@ -268,6 +285,13 @@ const Rules = () => {
                             onClick={cancelEdit}
                           >
                             Cancel
+                          </button>
+                          <button
+                            className="ml-auto rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-60"
+                            disabled={deleting || saving}
+                            onClick={() => deleteRule(rule)}
+                          >
+                            {deleting ? "Removing..." : "Remove Rule"}
                           </button>
                         </div>
                       </div>

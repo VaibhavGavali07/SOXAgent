@@ -1,6 +1,87 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { api } from "../api/client";
+
+// ---------------------------------------------------------------------------
+// Multi-recipient email input
+// ---------------------------------------------------------------------------
+const EmailRecipientsInput = ({ value, onChange }) => {
+  const [draft, setDraft] = useState("");
+  const inputRef = useRef(null);
+
+  // value is a comma-separated string; split into array for display
+  const recipients = value
+    ? value.split(",").map((s) => s.trim()).filter(Boolean)
+    : [];
+
+  const addEmail = () => {
+    const email = draft.trim().toLowerCase();
+    if (!email) return;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast.error("Enter a valid email address");
+      return;
+    }
+    if (recipients.includes(email)) {
+      toast.error("Already in the list");
+      return;
+    }
+    onChange([...recipients, email].join(", "));
+    setDraft("");
+    inputRef.current?.focus();
+  };
+
+  const remove = (email) => {
+    onChange(recipients.filter((r) => r !== email).join(", "));
+  };
+
+  return (
+    <div>
+      {/* chips */}
+      {recipients.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {recipients.map((email) => (
+            <span
+              key={email}
+              className="flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 pl-3 pr-2 py-1 text-xs font-medium text-blue-700"
+            >
+              {email}
+              <button
+                type="button"
+                className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-200 text-blue-700 hover:bg-blue-300"
+                onClick={() => remove(email)}
+                aria-label={`Remove ${email}`}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      {/* add row */}
+      <div className="flex gap-2">
+        <input
+          ref={inputRef}
+          className="input flex-1"
+          type="email"
+          placeholder="name@company.com"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addEmail(); } }}
+        />
+        <button
+          type="button"
+          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          onClick={addEmail}
+        >
+          Add
+        </button>
+      </div>
+      {recipients.length > 0 && (
+        <p className="mt-1.5 text-xs text-slate-400">{recipients.length} recipient{recipients.length > 1 ? "s" : ""}</p>
+      )}
+    </div>
+  );
+};
 
 const seed = {
   llm: { provider: "mock", deployment_name: "mock-llm", api_key: "", endpoint: "", api_version: "" },
@@ -14,11 +95,23 @@ const sections = [
   { key: "notifications", title: "Email Notifications", fields: ["smtp_host", "smtp_port", "smtp_user", "smtp_password", "email_from", "email_to", "webhook_url"] }
 ];
 
+const SENSITIVE_TERMS = ["password", "token", "key", "secret"];
+const isSensitiveField = (field) => SENSITIVE_TERMS.some((t) => field.toLowerCase().includes(t));
+
 const ConnectionForms = ({ configs, onSaved }) => {
+  // Track which config types have been saved to DB (for the "Saved" placeholder on sensitive fields)
+  const savedTypes = useMemo(() => new Set(configs.map((c) => c.config_type)), [configs]);
+
   const existing = useMemo(() => {
-    const mapped = { ...seed };
+    const mapped = {
+      llm: { ...seed.llm },
+      servicenow: { ...seed.servicenow },
+      notifications: { ...seed.notifications },
+    };
     configs.forEach((config) => {
-      mapped[config.config_type] = { ...mapped[config.config_type], ...config.data };
+      if (mapped[config.config_type] !== undefined) {
+        mapped[config.config_type] = { ...mapped[config.config_type], ...config.data };
+      }
     });
     if (mapped.servicenow.username && !mapped.servicenow.client_id) {
       mapped.servicenow.client_id = mapped.servicenow.username;
@@ -42,7 +135,13 @@ const ConnectionForms = ({ configs, onSaved }) => {
   const saveSection = async (configType) => {
     setSavingKey(configType);
     try {
-      await api.saveConfig({ config_type: configType, name: `${configType}-default`, data: values[configType] });
+      // Strip blank sensitive fields so we don't overwrite saved credentials with empty strings
+      const data = Object.fromEntries(
+        Object.entries(values[configType]).filter(
+          ([field, val]) => !(isSensitiveField(field) && val === "" && savedTypes.has(configType))
+        )
+      );
+      await api.saveConfig({ config_type: configType, name: `${configType}-default`, data });
       toast.success(`${configType} config saved`);
       onSaved();
     } catch (error) {
@@ -94,6 +193,11 @@ const ConnectionForms = ({ configs, onSaved }) => {
                 <div className="label">{section.title}</div>
                 <h3 className="mt-2 font-display text-2xl text-ink">Connection setup</h3>
               </div>
+              {savedTypes.has(section.key) && (
+                <span className="mt-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                  Configured
+                </span>
+              )}
             </div>
             <div className="mt-5 grid gap-4">
               {section.fields.map((field) => (
@@ -115,11 +219,27 @@ const ConnectionForms = ({ configs, onSaved }) => {
                       <option value="azure_openai">azure_openai</option>
                       <option value="gemini">gemini</option>
                     </select>
+                  ) : section.key === "notifications" && field === "email_to" ? (
+                    <EmailRecipientsInput
+                      value={values.notifications?.email_to ?? ""}
+                      onChange={(val) =>
+                        setValues((current) => ({
+                          ...current,
+                          notifications: { ...current.notifications, email_to: val }
+                        }))
+                      }
+                    />
                   ) : (
                     <input
                       className="input"
-                      type={field.toLowerCase().includes("password") || field.toLowerCase().includes("token") || field.toLowerCase().includes("key") || field.toLowerCase().includes("secret") ? "password" : "text"}
-                      placeholder={section.key === "llm" && field === "api_version" ? "optional — defaults to 2024-02-01" : ""}
+                      type={isSensitiveField(field) ? "password" : "text"}
+                      placeholder={
+                        isSensitiveField(field) && savedTypes.has(section.key)
+                          ? "Saved — leave blank to keep current"
+                          : section.key === "llm" && field === "api_version"
+                            ? "optional — defaults to 2024-02-01"
+                            : ""
+                      }
                       value={values[section.key]?.[field] ?? ""}
                       onChange={(event) =>
                         setValues((current) => ({

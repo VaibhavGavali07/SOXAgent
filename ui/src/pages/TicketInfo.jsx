@@ -9,6 +9,10 @@ const priorityClass = {
   LOW: "bg-blue-100 text-blue-700",
 };
 
+const RULE_SORT = { FAIL: 0, NEEDS_REVIEW: 1, PASS: 2 };
+const sortRules = (rules) =>
+  [...(rules || [])].sort((a, b) => (RULE_SORT[a.status] ?? 3) - (RULE_SORT[b.status] ?? 3));
+
 const TicketInfo = ({ refreshKey, onRunStarted, presetFilters = {} }) => {
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -205,7 +209,7 @@ const TicketInfo = ({ refreshKey, onRunStarted, presetFilters = {} }) => {
 
         <div className="px-6 pb-6">
           <div className="overflow-hidden rounded-2xl border border-slate-200">
-            <div className="grid grid-cols-[0.9fr_1.6fr_0.8fr_0.8fr_0.8fr_0.6fr_0.6fr_0.8fr_1fr] gap-4 bg-slate-100 px-4 py-3 text-xs font-semibold uppercase tracking-[0.16em] text-slate-600">
+            <div className="grid grid-cols-[0.9fr_1.6fr_0.8fr_0.8fr_0.8fr_0.6fr_0.6fr_0.8fr_1fr] gap-4 bg-slate-100 px-6 py-4 text-xs font-semibold uppercase tracking-[0.16em] text-slate-600">
               <div>Key</div>
               <div>Title</div>
               <div>Source</div>
@@ -217,18 +221,18 @@ const TicketInfo = ({ refreshKey, onRunStarted, presetFilters = {} }) => {
               <div>Analysed</div>
             </div>
             {loading ? (
-              <div className="px-4 py-10 text-center text-sm text-slate-500">Loading tickets...</div>
+              <div className="px-6 py-12 text-center text-sm text-slate-500">Loading tickets...</div>
             ) : tickets.length ? (
-              <div className="max-h-[460px] overflow-y-auto bg-white">
+              <div className="max-h-[620px] overflow-y-auto bg-white">
                 {tickets.map((ticket) => (
                   <button
                     key={ticket.id}
                     onClick={() => handleRowClick(ticket)}
-                    className={`grid w-full grid-cols-[0.9fr_1.6fr_0.8fr_0.8fr_0.8fr_0.6fr_0.6fr_0.8fr_1fr] gap-4 border-t border-slate-100 px-4 py-3 text-left text-sm transition ${
+                    className={`grid w-full grid-cols-[0.9fr_1.6fr_0.8fr_0.8fr_0.8fr_0.6fr_0.6fr_0.8fr_1fr] gap-4 border-t border-slate-100 px-6 py-5 text-left text-sm transition ${
                       selected?.id === ticket.id ? "bg-blue-50" : "hover:bg-slate-50"
                     }`}
                   >
-                    <div className="font-semibold text-slate-900">
+                    <div className="font-semibold text-base text-slate-900">
                       {ticket.servicenow_url ? (
                         <a
                           href={ticket.servicenow_url}
@@ -243,17 +247,17 @@ const TicketInfo = ({ refreshKey, onRunStarted, presetFilters = {} }) => {
                         ticket.ticket_id
                       )}
                     </div>
-                    <div className="truncate text-slate-700">{ticket.summary}</div>
+                    <div className="truncate font-medium text-slate-700">{ticket.summary}</div>
                     <div className="uppercase text-slate-600">{ticket.source}</div>
                     <div className="text-slate-600">{ticket.status}</div>
                     <div>
-                      <span className={`rounded-full px-2 py-1 text-xs font-semibold ${priorityClass[ticket.priority] || "bg-slate-100 text-slate-700"}`}>
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${priorityClass[ticket.priority] || "bg-slate-100 text-slate-700"}`}>
                         {ticket.priority}
                       </span>
                     </div>
-                    <div className="font-semibold text-emerald-700">{ticket.passed}</div>
-                    <div className="font-semibold text-rose-700">{ticket.failed}</div>
-                    <div className="font-semibold text-slate-800">{ticket.violations}</div>
+                    <div className="text-base font-semibold text-emerald-700">{ticket.passed}</div>
+                    <div className="text-base font-semibold text-rose-700">{ticket.failed}</div>
+                    <div className="text-base font-semibold text-slate-800">{ticket.violations}</div>
                     <div className="text-slate-500">{ticket.analyzed_at ? ticket.analyzed_at.slice(0, 16).replace("T", " ") : "-"}</div>
                   </button>
                 ))}
@@ -308,7 +312,7 @@ const TicketInfo = ({ refreshKey, onRunStarted, presetFilters = {} }) => {
               {JSON.stringify(selectedDetail.ticket.canonical_json, null, 2)}
             </pre>
             <div className="max-h-[420px] space-y-2 overflow-y-auto">
-              {selectedDetail.rule_results.map((rule) => (
+              {sortRules(selectedDetail.rule_results).map((rule) => (
                 <div key={rule.rule_id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                   <div className="flex items-center justify-between">
                     <div className="font-semibold text-slate-900">{rule.rule_id}</div>

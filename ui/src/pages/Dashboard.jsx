@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import {
   Bar,
@@ -14,6 +14,51 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import RealtimeStatus from "../components/RealtimeStatus";
+
+const AcceptRiskModal = ({ alert, onConfirm, onCancel }) => {
+  const [note, setNote] = useState("");
+  const textareaRef = useRef(null);
+
+  useEffect(() => {
+    if (alert) {
+      setNote("");
+      setTimeout(() => textareaRef.current?.focus(), 50);
+    }
+  }, [alert]);
+
+  if (!alert) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+        <h3 className="text-lg font-semibold text-slate-900">Accept Risk</h3>
+        <p className="mt-1 text-sm text-slate-500">
+          <span className="font-medium text-slate-700">{alert.ticket_id}</span> — {alert.rule_id}
+        </p>
+        <p className="mt-3 text-sm text-slate-600">
+          Provide a business justification for accepting this violation as-is. This will be stored as a formal risk acceptance record.
+        </p>
+        <textarea
+          ref={textareaRef}
+          className="input mt-3 h-28 w-full resize-none"
+          placeholder="e.g. Approved by CISO on 2024-03-15 — compensating control in place via monthly access review..."
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
+        <div className="mt-4 flex justify-end gap-3">
+          <button className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-50" onClick={onCancel}>Cancel</button>
+          <button
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+            disabled={!note.trim()}
+            onClick={() => onConfirm(note.trim())}
+          >
+            Accept Risk
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const severityColors = {
   HIGH: "#ef4444",
@@ -61,6 +106,9 @@ const Dashboard = ({ summary, loading, refreshing, runId, runProgress, runEvents
   const [violations, setViolations] = useState([]);
   const [loadingViolations, setLoadingViolations] = useState(true);
   const [actionLoading, setActionLoading] = useState({});
+  const [ackModal, setAckModal] = useState(null);
+  const [reanalyzingIds, setReanalyzingIds] = useState(new Set());
+  const [resolveResults, setResolveResults] = useState({});
 
   const loadViolations = async () => {
     try {
@@ -78,43 +126,73 @@ const Dashboard = ({ summary, loading, refreshing, runId, runProgress, runEvents
     loadViolations();
   }, [summary]);
 
-  const handleAck = async (alertId) => {
-    setActionLoading((prev) => ({ ...prev, [`ack-${alertId}`]: true }));
+  const handleAckConfirm = async (note) => {
+    const alert = ackModal;
+    setAckModal(null);
+    setActionLoading((prev) => ({ ...prev, [`ack-${alert.id}`]: true }));
     try {
-      await api.acknowledgeViolation(alertId);
+      await api.acknowledgeViolation(alert.id, note);
       setViolations((prev) =>
         prev.map((v) =>
-          v.id === alertId
-            ? { ...v, ack_status: "acknowledged", acknowledged_at: new Date().toISOString() }
+          v.id === alert.id
+            ? { ...v, ack_status: "acknowledged", acknowledged_at: new Date().toISOString(), risk_note: note }
             : v
         )
       );
-      toast.success("Violation acknowledged");
+      toast.success("Risk accepted — violation acknowledged");
       onRefreshSummary?.();
     } catch {
       toast.error("Failed to acknowledge violation");
     } finally {
-      setActionLoading((prev) => ({ ...prev, [`ack-${alertId}`]: false }));
+      setActionLoading((prev) => ({ ...prev, [`ack-${alert.id}`]: false }));
     }
   };
 
-  const handleResolve = async (alertId) => {
-    setActionLoading((prev) => ({ ...prev, [`res-${alertId}`]: true }));
+  const waitForRun = (runId) =>
+    new Promise((resolve) => {
+      const source = new EventSource(api.runEventsUrl(runId));
+      let done = false;
+      const finish = () => { if (!done) { done = true; source.close(); resolve(); } };
+      source.onmessage = (e) => {
+        const payload = JSON.parse(e.data);
+        if (payload.status === "completed" || payload.status === "failed") finish();
+      };
+      source.onerror = finish;
+      setTimeout(finish, 90_000);
+    });
+
+  const handleResolve = async (alert) => {
+    setResolveResults((prev) => { const n = { ...prev }; delete n[alert.id]; return n; });
+    setReanalyzingIds((prev) => new Set([...prev, alert.id]));
     try {
-      await api.resolveViolation(alertId);
-      setViolations((prev) =>
-        prev.map((v) =>
-          v.id === alertId
-            ? { ...v, ack_status: "resolved", resolved_at: new Date().toISOString(), acknowledged_at: v.acknowledged_at || new Date().toISOString() }
-            : v
-        )
-      );
-      toast.success("Violation resolved");
-      onRefreshSummary?.();
-    } catch {
-      toast.error("Failed to resolve violation");
+      const runResult = await api.rerunTicket(alert.ticket_db_id);
+      await waitForRun(runResult.run_id);
+
+      const detail = await api.violation(alert.id);
+      const failedRules = (detail.rule_results || [])
+        .filter((r) => r.status === "FAIL" || r.status === "NEEDS_REVIEW")
+        .map((r) => r.rule_id);
+
+      if (failedRules.length === 0) {
+        await api.resolveViolation(alert.id);
+        setViolations((prev) =>
+          prev.map((v) =>
+            v.id === alert.id
+              ? { ...v, ack_status: "resolved", resolved_at: new Date().toISOString(), acknowledged_at: v.acknowledged_at || new Date().toISOString() }
+              : v
+          )
+        );
+        setResolveResults((prev) => ({ ...prev, [alert.id]: { allPassed: true, failedRules: [] } }));
+        toast.success(`${alert.ticket_id} — all controls passed, violation resolved`);
+        onRefreshSummary?.();
+      } else {
+        setResolveResults((prev) => ({ ...prev, [alert.id]: { allPassed: false, failedRules } }));
+        toast.error(`${alert.ticket_id} — ${failedRules.length} rule(s) still failing`);
+      }
+    } catch (err) {
+      toast.error(`Re-analysis failed: ${err?.message || "unknown error"}`);
     } finally {
-      setActionLoading((prev) => ({ ...prev, [`res-${alertId}`]: false }));
+      setReanalyzingIds((prev) => { const n = new Set(prev); n.delete(alert.id); return n; });
     }
   };
 
@@ -131,6 +209,11 @@ const Dashboard = ({ summary, loading, refreshing, runId, runProgress, runEvents
 
   return (
     <div className="space-y-6">
+      <AcceptRiskModal
+        alert={ackModal}
+        onConfirm={handleAckConfirm}
+        onCancel={() => setAckModal(null)}
+      />
       <div className="rounded-2xl border border-slate-200 bg-white p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="text-sm text-slate-500">{statusText}</div>
@@ -263,52 +346,65 @@ const Dashboard = ({ summary, loading, refreshing, runId, runProgress, runEvents
             <div className="px-5 py-10 text-center text-sm text-slate-500">Loading violations...</div>
           ) : violations.length ? (
             <div className="max-h-[420px] overflow-y-auto">
-              {violations.map((v) => (
-                <div
-                  key={v.id}
-                  className="grid grid-cols-[1.1fr_0.9fr_0.7fr_0.75fr_1fr_1.1fr] gap-4 border-t border-slate-100 px-5 py-3 text-sm"
-                >
-                  <div>
-                    <div className="font-semibold text-slate-900">{v.ticket_id}</div>
-                    <div className="mt-0.5 truncate text-xs text-slate-500">{v.title}</div>
-                  </div>
-                  <div className="text-slate-700">{v.rule_id}</div>
-                  <div>
-                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${v.severity === "HIGH" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"}`}>
-                      {v.severity}
-                    </span>
-                  </div>
-                  <div>
-                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${ackStatusStyles[v.ack_status] || "bg-slate-100 text-slate-600"}`}>
-                      {v.ack_status}
-                    </span>
-                  </div>
-                  <div className="text-slate-500">{v.created_at?.slice(0, 16).replace("T", " ")}</div>
-                  <div className="flex items-center gap-2">
-                    {v.ack_status !== "acknowledged" && v.ack_status !== "resolved" && (
-                      <button
-                        className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 transition hover:bg-amber-100 disabled:opacity-50"
-                        onClick={() => handleAck(v.id)}
-                        disabled={actionLoading[`ack-${v.id}`]}
-                      >
-                        {actionLoading[`ack-${v.id}`] ? "..." : "Ack"}
-                      </button>
+              {violations.map((v) => {
+                const isReanalyzing = reanalyzingIds.has(v.id);
+                const resolveResult = resolveResults[v.id];
+                return (
+                  <div key={v.id} className="border-t border-slate-100">
+                    <div className="grid grid-cols-[1.1fr_0.9fr_0.7fr_0.75fr_1fr_1.1fr] gap-4 px-5 py-3 text-sm">
+                      <div>
+                        <div className="font-semibold text-slate-900">{v.ticket_id}</div>
+                        <div className="mt-0.5 truncate text-xs text-slate-500">{v.title}</div>
+                      </div>
+                      <div className="text-slate-700">{v.rule_id}</div>
+                      <div>
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${v.severity === "HIGH" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"}`}>
+                          {v.severity}
+                        </span>
+                      </div>
+                      <div>
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${ackStatusStyles[v.ack_status] || "bg-slate-100 text-slate-600"}`}>
+                          {v.ack_status}
+                        </span>
+                        {v.risk_note && (
+                          <div className="mt-1 line-clamp-2 text-xs text-slate-500" title={v.risk_note}>{v.risk_note}</div>
+                        )}
+                      </div>
+                      <div className="text-slate-500">{v.created_at?.slice(0, 16).replace("T", " ")}</div>
+                      <div className="flex flex-wrap items-start gap-1.5">
+                        {v.ack_status !== "acknowledged" && v.ack_status !== "resolved" && (
+                          <button
+                            className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 transition hover:bg-amber-100 disabled:opacity-50"
+                            onClick={() => setAckModal(v)}
+                            disabled={!!actionLoading[`ack-${v.id}`]}
+                          >
+                            {actionLoading[`ack-${v.id}`] ? "..." : "Accept Risk"}
+                          </button>
+                        )}
+                        {v.ack_status !== "resolved" && (
+                          <button
+                            className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
+                            onClick={() => handleResolve(v)}
+                            disabled={isReanalyzing}
+                          >
+                            {isReanalyzing ? "Checking..." : "Resolve"}
+                          </button>
+                        )}
+                        {v.ack_status === "resolved" && (
+                          <span className="text-xs font-medium text-emerald-600">✓ Done</span>
+                        )}
+                      </div>
+                    </div>
+                    {resolveResult && !resolveResult.allPassed && (
+                      <div className="mx-4 mb-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-xs">
+                        <span className="font-semibold text-rose-700">Still failing after re-analysis: </span>
+                        <span className="text-rose-600">{resolveResult.failedRules.join(", ")}</span>
+                        <span className="ml-2 text-slate-500">— fix the underlying issue and try Resolve again.</span>
+                      </div>
                     )}
-                    {v.ack_status !== "resolved" && (
-                      <button
-                        className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
-                        onClick={() => handleResolve(v.id)}
-                        disabled={actionLoading[`res-${v.id}`]}
-                      >
-                        {actionLoading[`res-${v.id}`] ? "..." : "Resolve"}
-                      </button>
-                    )}
-                    {v.ack_status === "resolved" && (
-                      <span className="text-xs text-emerald-600 font-medium">✓ Done</span>
-                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="px-5 py-10 text-center text-sm text-slate-500">No violations recorded yet. Run an analysis to populate.</div>

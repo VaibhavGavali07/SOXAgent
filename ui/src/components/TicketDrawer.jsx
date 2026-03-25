@@ -4,7 +4,62 @@ const statusStyles = {
   NEEDS_REVIEW: "bg-amber-100 text-amber-700"
 };
 
+const RULE_SORT = { FAIL: 0, NEEDS_REVIEW: 1, PASS: 2 };
+const sortRules = (rules) =>
+  [...(rules || [])].sort((a, b) => (RULE_SORT[a.status] ?? 3) - (RULE_SORT[b.status] ?? 3));
+
+const ScreenshotApprovals = ({ approvals }) => {
+  if (!approvals?.length) return null;
+  return (
+    <div className="mt-6 rounded-3xl border border-violet-200 bg-violet-50 p-5 shadow-panel">
+      <div className="flex items-center gap-2">
+        <span className="text-lg">📷</span>
+        <span className="text-sm font-semibold text-violet-800">
+          Screenshot Approval Evidence ({approvals.length} image{approvals.length !== 1 ? "s" : ""} analysed)
+        </span>
+      </div>
+      <div className="mt-3 space-y-3">
+        {approvals.map((apv, i) => {
+          const statusColor =
+            apv.approval_status === "approved"
+              ? "bg-emerald-100 text-emerald-700"
+              : apv.approval_status === "rejected"
+              ? "bg-rose-100 text-rose-700"
+              : "bg-slate-100 text-slate-600";
+          return (
+            <div key={i} className="rounded-2xl bg-white p-3 shadow-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate text-xs font-medium text-slate-700">📎 {apv.filename}</span>
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold capitalize ${statusColor}`}>
+                  {apv.approval_status}
+                </span>
+              </div>
+              {apv.approver && (
+                <div className="mt-1.5 text-xs text-slate-600">
+                  <span className="font-medium">Approver:</span> {apv.approver}
+                  {apv.timestamp && <span className="ml-2 text-slate-400">@ {apv.timestamp}</span>}
+                </div>
+              )}
+              {apv.approval_text && (
+                <div className="mt-1 text-xs italic text-slate-500">"{apv.approval_text}"</div>
+              )}
+              {apv.summary && (
+                <div className="mt-1 text-xs text-slate-500">{apv.summary}</div>
+              )}
+              <div className="mt-1.5 text-xs text-slate-400">
+                Confidence: {Math.round((apv.confidence || 0) * 100)}%
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 const TicketDrawer = ({ detail, onClose }) => {
+  const screenshotApprovals = detail?.ticket?.screenshot_approvals || [];
+
   return (
     <div className={`fixed inset-0 z-50 transition ${detail ? "pointer-events-auto" : "pointer-events-none"}`}>
       <div className={`absolute inset-0 bg-slate-950/40 transition ${detail ? "opacity-100" : "opacity-0"}`} onClick={onClose} />
@@ -28,8 +83,10 @@ const TicketDrawer = ({ detail, onClose }) => {
                 ))}
               </div>
             </div>
+
+            <ScreenshotApprovals approvals={screenshotApprovals} />
             <div className="mt-6 grid gap-3">
-              {detail.rule_results?.map((rule) => (
+              {sortRules(detail.rule_results).map((rule) => (
                 <div key={rule.rule_id} className="rounded-3xl bg-white p-5 shadow-panel">
                   <div className="flex items-start justify-between gap-3">
                     <div>

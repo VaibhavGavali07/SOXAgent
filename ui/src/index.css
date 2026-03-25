@@ -40,3 +40,58 @@ body {
 .skeleton {
   @apply animate-pulse rounded-2xl bg-slate-200/80;
 }
+
+@keyframes fade-slide-in {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.sidebar-item-enter {
+  animation: fade-slide-in 0.3s ease both;
+}
+
+/* Sidebar active item — cyan glow pulse */
+@keyframes active-glow {
+  0%, 100% { box-shadow: inset 2px 0 0 #22d3ee, 0 0 0 0 rgba(34,211,238,0); }
+  50%       { box-shadow: inset 2px 0 0 #22d3ee, 0 0 12px 2px rgba(34,211,238,0.12); }
+}
+
+.sidebar-active-glow {
+  animation: active-glow 2.8s ease-in-out infinite;
+}
+
+/* Header shimmer — dark navy with cyan streak */
+@keyframes shimmer-sweep {
+  0%   { background-position: -300% center; }
+  100% { background-position: 300% center; }
+}
+
+.header-shimmer {
+  background: linear-gradient(
+    105deg,
+    #060D1F 0%,
+    #0B1832 40%,
+    #0e2a52 48%,
+    #1a4a8a 50%,
+    #0e2a52 52%,
+    #0B1832 60%,
+    #060D1F 100%
+  );
+  background-size: 300% auto;
+  animation: shimmer-sweep 6s linear infinite;
+}
+
+/* Subtle scanline overlay for futuristic feel */
+@keyframes scanline {
+  0%   { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+
+.scanline::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(transparent 50%, rgba(0,220,255,0.015) 50%);
+  background-size: 100% 4px;
+  pointer-events: none;
+}

@@ -57,6 +57,20 @@ def list_configs(db: Session) -> list[ConfigRecord]:
     return list(db.scalars(select(ConfigRecord).order_by(ConfigRecord.config_type, ConfigRecord.name)))
 
 
+def delete_config(db: Session, config_type: str, name: str) -> bool:
+    record = db.scalar(
+        select(ConfigRecord).where(
+            ConfigRecord.config_type == config_type,
+            ConfigRecord.name == name,
+        )
+    )
+    if not record:
+        return False
+    db.delete(record)
+    db.commit()
+    return True
+
+
 def create_run(db: Session, source: str, metadata: dict[str, Any]) -> LLMRunRecord:
     run = LLMRunRecord(source=source, metadata_json=metadata, status="queued")
     db.add(run)
@@ -241,6 +255,15 @@ def save_embedding(db: Session, entity_type: str, entity_id: str, vector: list[f
 
 def list_embeddings(db: Session, entity_type: str) -> list[EmbeddingRecord]:
     return list(db.scalars(select(EmbeddingRecord).where(EmbeddingRecord.entity_type == entity_type)))
+
+
+def get_cached_llm_response(db: Session, phash: str) -> LLMResponseRecord | None:
+    """Return the most recent LLM response with a matching prompt hash, or None."""
+    return db.scalar(
+        select(LLMResponseRecord)
+        .where(LLMResponseRecord.prompt_hash == phash)
+        .order_by(desc(LLMResponseRecord.created_at))
+    )
 
 
 def create_llm_response(
@@ -433,14 +456,16 @@ def get_alert(db: Session, alert_id: int) -> AlertRecord | None:
     return db.get(AlertRecord, alert_id)
 
 
-def acknowledge_alert(db: Session, alert_id: int) -> AlertRecord | None:
+def acknowledge_alert(db: Session, alert_id: int, risk_note: str | None = None) -> AlertRecord | None:
     alert = db.get(AlertRecord, alert_id)
     if not alert:
         return None
     if not alert.acknowledged_at:
         alert.acknowledged_at = datetime.utcnow()
-        db.commit()
-        db.refresh(alert)
+    if risk_note is not None:
+        alert.risk_note = risk_note.strip() or None
+    db.commit()
+    db.refresh(alert)
     return alert
 
 

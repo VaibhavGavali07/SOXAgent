@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 56" fill="none">
+  <defs>
+    <linearGradient id="shieldFill" x1="0" y1="0" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1e3a8a"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+    <linearGradient id="shieldStroke" x1="0" y1="0" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="nodeGlow" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#e0f2fe"/>
+      <stop offset="100%" stop-color="#7dd3fc"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Shield body -->
+  <path d="M28 4 L50 13 L50 31 C50 43.5 39.5 52 28 55 C16.5 52 6 43.5 6 31 L6 13 Z"
+        fill="url(#shieldFill)"/>
+
+  <!-- Shield border glow -->
+  <path d="M28 4 L50 13 L50 31 C50 43.5 39.5 52 28 55 C16.5 52 6 43.5 6 31 L6 13 Z"
+        fill="none" stroke="url(#shieldStroke)" stroke-width="1.5" opacity="0.7"/>
+
+  <!-- Inner subtle highlight arc -->
+  <path d="M28 8 L46 16 L46 31 C46 41 37 48.5 28 51"
+        fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="8" stroke-linecap="round"/>
+
+  <!-- Neural network lines -->
+  <line x1="28" y1="17" x2="17" y2="28" stroke="rgba(125,211,252,0.5)" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="28" y1="17" x2="39" y2="28" stroke="rgba(125,211,252,0.5)" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="17" y1="28" x2="22" y2="39" stroke="rgba(125,211,252,0.4)" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="39" y1="28" x2="34" y2="39" stroke="rgba(125,211,252,0.4)" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="17" y1="28" x2="39" y2="28" stroke="rgba(125,211,252,0.25)" stroke-width="1" stroke-linecap="round"/>
+  <line x1="22" y1="39" x2="34" y2="39" stroke="rgba(125,211,252,0.25)" stroke-width="1" stroke-linecap="round"/>
+
+  <!-- Neural network nodes -->
+  <circle cx="28" cy="17" r="3.5" fill="url(#nodeGlow)"/>
+  <circle cx="17" cy="28" r="2.8" fill="url(#nodeGlow)" opacity="0.85"/>
+  <circle cx="39" cy="28" r="2.8" fill="url(#nodeGlow)" opacity="0.85"/>
+  <circle cx="22" cy="39" r="2.5" fill="url(#nodeGlow)" opacity="0.7"/>
+  <circle cx="34" cy="39" r="2.5" fill="url(#nodeGlow)" opacity="0.7"/>
+
+  <!-- Compliance checkmark overlay on top node -->
+  <path d="M23.5 17.5 L27 21.5 L33.5 13.5"
+        stroke="#fbbf24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>
