@@ -3,6 +3,198 @@ import toast from "react-hot-toast";
 import { api } from "../api/client";
 
 // ---------------------------------------------------------------------------
+// Scheduled Auto-Fetch section
+// ---------------------------------------------------------------------------
+const INTERVAL_PRESETS = [
+  { label: "Every 15 minutes", type: "minutes", value: 15 },
+  { label: "Every 30 minutes", type: "minutes", value: 30 },
+  { label: "Every 1 hour",     type: "hours",   value: 1  },
+  { label: "Every 2 hours",    type: "hours",   value: 2  },
+  { label: "Every 4 hours",    type: "hours",   value: 4  },
+  { label: "Every 6 hours",    type: "hours",   value: 6  },
+  { label: "Every 12 hours",   type: "hours",   value: 12 },
+  { label: "Every 24 hours",   type: "hours",   value: 24 },
+  { label: "Daily at a specific time", type: "daily", value: 0 },
+];
+
+const ScheduleSection = () => {
+  const [schedule, setSchedule] = useState({
+    enabled: false,
+    interval_type: "hours",
+    interval_value: 1,
+    daily_time: "09:00",
+    mode: "append",
+  });
+  const [nextRunTime, setNextRunTime] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const selectedPresetIdx = INTERVAL_PRESETS.findIndex(
+    (p) => p.type === schedule.interval_type && (p.type === "daily" || p.value === schedule.interval_value)
+  );
+
+  useEffect(() => {
+    api.getSchedule()
+      .then((data) => {
+        setSchedule({
+          enabled: data.enabled ?? false,
+          interval_type: data.interval_type ?? "hours",
+          interval_value: data.interval_value ?? 1,
+          daily_time: data.daily_time ?? "09:00",
+          mode: data.mode ?? "append",
+        });
+        setNextRunTime(data.next_run_time ?? null);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handlePresetChange = (idx) => {
+    const preset = INTERVAL_PRESETS[Number(idx)];
+    if (!preset) return;
+    setSchedule((s) => ({ ...s, interval_type: preset.type, interval_value: preset.value }));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const data = await api.saveSchedule(schedule);
+      setNextRunTime(data.next_run_time ?? null);
+      toast.success(schedule.enabled ? "Schedule saved & activated" : "Schedule saved (disabled)");
+    } catch {
+      toast.error("Failed to save schedule");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDisable = async () => {
+    setSaving(true);
+    try {
+      await api.disableSchedule();
+      setSchedule((s) => ({ ...s, enabled: false }));
+      setNextRunTime(null);
+      toast.success("Schedule disabled");
+    } catch {
+      toast.error("Failed to disable schedule");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const formatNextRun = (iso) => {
+    if (!iso) return null;
+    try { return new Date(iso).toLocaleString(); } catch { return iso; }
+  };
+
+  if (loading) return null;
+
+  return (
+    <div className="panel p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="label">Automation</div>
+          <h3 className="mt-2 font-display text-2xl text-ink">Scheduled Auto-Fetch</h3>
+          <p className="mt-1 text-sm text-slate-500">
+            Automatically fetch and analyse ServiceNow tickets on a recurring schedule.
+          </p>
+        </div>
+        {schedule.enabled && (
+          <span className="mt-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700 whitespace-nowrap">
+            Active
+          </span>
+        )}
+      </div>
+
+      <div className="mt-5 grid gap-4 sm:grid-cols-2">
+        {/* Enable toggle */}
+        <label className="col-span-full flex cursor-pointer items-center gap-3">
+          <div
+            className={`relative h-6 w-11 rounded-full transition-colors duration-200 ${schedule.enabled ? "bg-cyan-500" : "bg-slate-300"}`}
+            onClick={() => setSchedule((s) => ({ ...s, enabled: !s.enabled }))}
+          >
+            <span className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 ${schedule.enabled ? "translate-x-5" : "translate-x-0"}`} />
+          </div>
+          <span className="text-sm font-medium text-slate-700">
+            {schedule.enabled ? "Enabled — fetch will run automatically" : "Disabled — no automatic fetch"}
+          </span>
+        </label>
+
+        {/* Interval preset */}
+        <label className="block">
+          <div className="mb-2 text-sm font-medium text-slate-600">Fetch Interval</div>
+          <select
+            className="input"
+            value={selectedPresetIdx >= 0 ? selectedPresetIdx : 2}
+            onChange={(e) => handlePresetChange(e.target.value)}
+            disabled={!schedule.enabled}
+          >
+            {INTERVAL_PRESETS.map((p, i) => (
+              <option key={i} value={i}>{p.label}</option>
+            ))}
+          </select>
+        </label>
+
+        {/* Daily time picker — only shown for "daily" */}
+        {schedule.interval_type === "daily" && (
+          <label className="block">
+            <div className="mb-2 text-sm font-medium text-slate-600">Run at (UTC)</div>
+            <input
+              type="time"
+              className="input"
+              value={schedule.daily_time}
+              disabled={!schedule.enabled}
+              onChange={(e) => setSchedule((s) => ({ ...s, daily_time: e.target.value }))}
+            />
+          </label>
+        )}
+
+        {/* Fetch mode */}
+        <label className="block">
+          <div className="mb-2 text-sm font-medium text-slate-600">Fetch Mode</div>
+          <select
+            className="input"
+            value={schedule.mode}
+            disabled={!schedule.enabled}
+            onChange={(e) => setSchedule((s) => ({ ...s, mode: e.target.value }))}
+          >
+            <option value="append">Append — keep existing, add new tickets</option>
+            <option value="clean">Clean — clear existing data, fresh fetch</option>
+          </select>
+        </label>
+      </div>
+
+      {/* Next run status banner */}
+      {schedule.enabled && nextRunTime && (
+        <div className="mt-4 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
+          Next scheduled run: <span className="font-semibold">{formatNextRun(nextRunTime)}</span>
+        </div>
+      )}
+
+      <div className="mt-5 flex flex-wrap gap-3">
+        <button
+          className="button-primary disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={saving}
+          onClick={handleSave}
+        >
+          {saving ? "Saving..." : "Save Schedule"}
+        </button>
+        {schedule.enabled && (
+          <button
+            className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-60"
+            disabled={saving}
+            onClick={handleDisable}
+          >
+            Disable
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // Multi-recipient email input
 // ---------------------------------------------------------------------------
 const EmailRecipientsInput = ({ value, onChange }) => {
@@ -263,6 +455,8 @@ const ConnectionForms = ({ configs, onSaved }) => {
           </div>
         ))}
       </div>
+
+      <ScheduleSection />
 
       <div className="panel border-rose-200 bg-rose-50/40 p-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">

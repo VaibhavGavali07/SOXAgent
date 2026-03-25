@@ -1,3 +1,5 @@
+import TicketInfoPanel from "./TicketInfoPanel";
+
 const statusStyles = {
   PASS: "bg-emerald-100 text-emerald-700",
   FAIL: "bg-rose-100 text-rose-700",
@@ -57,6 +59,7 @@ const ScreenshotApprovals = ({ approvals }) => {
   );
 };
 
+
 const TicketDrawer = ({ detail, onClose }) => {
   const screenshotApprovals = detail?.ticket?.screenshot_approvals || [];
 
@@ -73,51 +76,55 @@ const TicketDrawer = ({ detail, onClose }) => {
         </div>
         {detail ? (
           <div className="h-[calc(100vh-104px)] overflow-y-auto px-6 py-5">
-            <div className="rounded-3xl bg-white p-5 shadow-panel">
-              <div className="text-sm text-slate-500">{detail.detail}</div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {detail.evidence?.map((item, index) => (
-                  <div key={`${item.ref_id}-${index}`} className="rounded-2xl bg-slate-100 px-3 py-2 text-xs text-slate-700">
-                    {item.ref_id}: {item.snippet}
-                  </div>
-                ))}
-              </div>
+            {/* Violation summary */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-5">
+              <div className="mb-1 text-xs font-bold uppercase tracking-widest text-slate-400">Violation Summary</div>
+              <div className="text-sm text-slate-600">{detail.detail}</div>
+              {detail.evidence?.length > 0 && (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {detail.evidence.map((item, index) => (
+                    <div key={`${item.ref_id}-${index}`} className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs text-slate-700">
+                      <span className="font-medium">{item.ref_id}:</span> {item.snippet}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Ticket details — human readable */}
+            <div className="mt-6">
+              <TicketInfoPanel ticket={detail.ticket} />
             </div>
 
             <ScreenshotApprovals approvals={screenshotApprovals} />
+
+            {/* Rule results */}
             <div className="mt-6 grid gap-3">
               {sortRules(detail.rule_results).map((rule) => (
-                <div key={rule.rule_id} className="rounded-3xl bg-white p-5 shadow-panel">
+                <div key={rule.rule_id} className="rounded-2xl border border-slate-200 bg-white p-5">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <div className="font-semibold text-slate-900">{rule.rule_id} {rule.rule_name}</div>
+                      <div className="font-semibold text-slate-900">{rule.rule_id} — {rule.rule_name}</div>
                       <div className="mt-2 text-sm text-slate-600">{rule.why}</div>
                     </div>
-                    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusStyles[rule.status]}`}>{rule.status}</span>
+                    <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${statusStyles[rule.status]}`}>{rule.status}</span>
                   </div>
-                  <div className="mt-3 text-sm text-slate-600">Confidence: {Math.round(rule.confidence * 100)}%</div>
+                  <div className="mt-2 text-xs text-slate-500">Confidence: {Math.round(rule.confidence * 100)}%</div>
                   <div className="mt-3 text-sm font-medium text-slate-800">Recommended action</div>
                   <div className="mt-1 text-sm text-slate-600">{rule.recommended_action}</div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {rule.evidence?.map((item, index) => (
-                      <div key={`${rule.rule_id}-${item.ref_id}-${index}`} className="rounded-2xl bg-slate-100 px-3 py-2 text-xs text-slate-700">
-                        {item.type} | {item.ref_id} | {item.snippet}
-                      </div>
-                    ))}
-                  </div>
+                  {rule.evidence?.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {rule.evidence.map((item, index) => (
+                        <div key={`${rule.rule_id}-${item.ref_id}-${index}`} className="rounded-xl bg-slate-100 px-3 py-1.5 text-xs text-slate-700">
+                          <span className="font-medium capitalize">{item.type}</span> · {item.ref_id} · {item.snippet}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
-            {detail.llm_response ? (
-              <div className="mt-6 rounded-3xl bg-[#101826] p-5 text-slate-100 shadow-panel">
-                <div className="label text-slate-400">LLM response</div>
-                <div className="mt-3 text-xs text-slate-300">
-                  {detail.llm_response.provider} / {detail.llm_response.deployment_name} / {detail.llm_response.run_id}
-                </div>
-                <div className="mt-1 text-xs text-slate-400">Prompt hash: {detail.llm_response.prompt_hash}</div>
-                <pre className="mt-3 overflow-auto text-xs">{JSON.stringify(detail.llm_response.response_json, null, 2)}</pre>
-              </div>
-            ) : null}
+
           </div>
         ) : null}
       </aside>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { api } from "../api/client";
 import RunModeModal from "../components/RunModeModal";
+import TicketInfoPanel from "../components/TicketInfoPanel";
 
 const priorityClass = {
   HIGH: "bg-rose-100 text-rose-700",
@@ -307,23 +308,29 @@ const TicketInfo = ({ refreshKey, onRunStarted, presetFilters = {} }) => {
               Re-run LLM Evaluation
             </button>
           </div>
-          <div className="mt-4 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-            <pre className="max-h-[420px] overflow-auto rounded-xl bg-[#0b1732] p-4 text-xs text-slate-100">
-              {JSON.stringify(selectedDetail.ticket.canonical_json, null, 2)}
-            </pre>
-            <div className="max-h-[420px] space-y-2 overflow-y-auto">
-              {sortRules(selectedDetail.rule_results).map((rule) => (
-                <div key={rule.rule_id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <div className="flex items-center justify-between">
-                    <div className="font-semibold text-slate-900">{rule.rule_id}</div>
-                    <div className={`rounded-full px-2 py-1 text-xs font-semibold ${rule.status === "FAIL" ? "bg-rose-100 text-rose-700" : rule.status === "PASS" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                      {rule.status}
+          <div className="mt-4 space-y-4">
+            <TicketInfoPanel ticket={selectedDetail.ticket.canonical_json} />
+            {selectedDetail.rule_results?.length > 0 && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="mb-3 text-xs font-bold uppercase tracking-widest text-slate-400">Rule Results</div>
+                <div className="space-y-2">
+                  {sortRules(selectedDetail.rule_results).map((rule) => (
+                    <div key={rule.rule_id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <div className="flex items-center justify-between">
+                        <div className="font-semibold text-slate-900">{rule.rule_id} — {rule.rule_name}</div>
+                        <div className={`rounded-full px-2 py-1 text-xs font-semibold ${rule.status === "FAIL" ? "bg-rose-100 text-rose-700" : rule.status === "PASS" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                          {rule.status}
+                        </div>
+                      </div>
+                      <div className="mt-2 text-sm text-slate-600">{rule.why}</div>
+                      {rule.recommended_action && (
+                        <div className="mt-2 text-xs text-slate-500"><span className="font-medium">Action:</span> {rule.recommended_action}</div>
+                      )}
                     </div>
-                  </div>
-                  <div className="mt-2 text-sm text-slate-600">{rule.why}</div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
           </div>
         </div>
       ) : null}

@@ -44,5 +44,8 @@ export const api = {
   rules: () => request("/api/rules"),
   createRule: (payload) => request("/api/rules", { method: "POST", body: JSON.stringify(payload) }),
   updateRule: (ruleId, payload) => request(`/api/rules/${encodeURIComponent(ruleId)}`, { method: "PUT", body: JSON.stringify(payload) }),
-  deleteRule: (ruleId) => request(`/api/rules/${encodeURIComponent(ruleId)}`, { method: "DELETE" })
+  deleteRule: (ruleId) => request(`/api/rules/${encodeURIComponent(ruleId)}`, { method: "DELETE" }),
+  getSchedule: () => request("/api/schedule"),
+  saveSchedule: (payload) => request("/api/schedule", { method: "POST", body: JSON.stringify(payload) }),
+  disableSchedule: () => request("/api/schedule", { method: "DELETE" }),
 };
